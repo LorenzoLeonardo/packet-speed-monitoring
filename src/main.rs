@@ -1,5 +1,3 @@
-use etherparse::Ipv4HeaderSlice;
-use pcap::{Capture, Device};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::{
@@ -7,6 +5,12 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
+
+use etherparse::Ipv4HeaderSlice;
+use ipc_broker::client::ClientHandle;
+use pcap::{Capture, Device};
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::task;
 
 #[derive(Default)]
@@ -15,11 +19,19 @@ struct Stats {
     download_bytes: usize,
 }
 
+#[derive(Default, Serialize, Deserialize, Debug)]
+struct SpeedInfo {
+    ip: String,
+    dspeed: f64,
+    uspeed: f64,
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let device = Device::lookup().expect("No device found").unwrap();
     println!("Sniffing on device: {:?}", device.name);
 
+    let client = ClientHandle::connect().await?;
     // Open capture (mutable because we'll set non-blocking)
     let mut cap = Capture::from_device(device)
         .unwrap()
@@ -32,6 +44,7 @@ async fn main() -> std::io::Result<()> {
     // Shared shutdown flag
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_for_task = shutdown.clone();
+    let (tx, mut rx) = unbounded_channel();
 
     // Move cap into the blocking task
     let handle = task::spawn_blocking(move || {
@@ -73,6 +86,13 @@ async fn main() -> std::io::Result<()> {
                         println!(
                             "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
                         );
+                        if let Err(e) = tx.send(SpeedInfo {
+                            ip: ip.to_string(),
+                            dspeed: down_mbps,
+                            uspeed: up_mbps,
+                        }) {
+                            eprintln!("{e}");
+                        }
                     }
                     s.upload_bytes = 0;
                     s.download_bytes = 0;
@@ -84,6 +104,35 @@ async fn main() -> std::io::Result<()> {
         println!("pcap thread exiting cleanly");
     });
 
+    let (oneshot_tx, mut oneshot_rx) = unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                result = rx.recv() => {
+                    match result {
+                        Some(val) => {
+                            println!("signal received: {val:?}");
+                            let value = serde_json::to_value(&val).unwrap();
+                            let _ = client
+                                .publish("application.lan.speed", "speedInfo", &value)
+                                .await;
+                        }
+                        None => {
+                            println!("rx channel closed, exiting...");
+                            break;
+                        }
+                    }
+                }
+                Some(flag) = oneshot_rx.recv() => {
+                    if flag {
+                        println!("Exit tokio::select");
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
     println!("Sniffer started. Press Ctrl+C to stop.");
 
     // Wait for Ctrl+C on the main runtime thread
@@ -92,6 +141,8 @@ async fn main() -> std::io::Result<()> {
 
     // signal the blocking task to stop and await it
     shutdown.store(true, Ordering::Relaxed);
+    // exit the tokio::select
+    let _ = oneshot_tx.send(true);
     // wait for the blocking task to finish
     let _ = handle.await;
 
