@@ -106,10 +106,14 @@ async fn publish_speed_info(
             match rx.recv().await {
                 Some(val) => {
                     println!("signal received: {val:?}");
-                    let value = serde_json::to_value(&val).unwrap();
-                    let _ = client
-                        .publish("application.lan.speed", "speedInfo", &value)
-                        .await;
+                    if let Ok(value) = serde_json::to_value(&val) {
+                        let _ = client
+                            .publish("application.lan.speed", "speedInfo", &value)
+                            .await;
+                    } else {
+                        println!("[publish_speed_info] parse error to Value.");
+                        break;
+                    }
                 }
                 None => {
                     println!("[publish_speed_info] rx channel closed, exiting...");
@@ -118,6 +122,34 @@ async fn publish_speed_info(
             }
         }
     }))
+}
+
+async fn wait_until_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut term = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+        let mut int = signal(SignalKind::interrupt()).expect("Failed to install SIGINT handler");
+
+        tokio::select! {
+            _ = term.recv() => {
+                println!("Received SIGTERM (systemd stop).");
+            }
+            _ = int.recv() => {
+                println!("Received SIGINT (Ctrl+C).");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, only Ctrl+C is supported directly
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+        println!("Received Ctrl+C (Windows)");
+    }
 }
 
 #[tokio::main]
@@ -131,15 +163,20 @@ async fn main() -> std::io::Result<()> {
 
     println!("Sniffer started. Press Ctrl+C to stop.");
 
-    tokio::signal::ctrl_c().await?;
-    println!("Ctrl+C received — shutting down...");
+    // wait here until signal is sent
+    wait_until_signal().await;
 
+    // Set to true to signal the task to exit properly
     shutdown.store(true, Ordering::Relaxed);
 
     // wait for blocking thread to end
-    let _ = packet_listener_handle.await;
-    let _ = publisher_handle.await;
+    let (result1, result2) = tokio::join!(packet_listener_handle, publisher_handle);
 
+    for (i, res) in [result1, result2].into_iter().enumerate() {
+        if let Err(e) = res {
+            eprintln!("Task {i} failed: {e}");
+        }
+    }
     println!("[packet-speed-monitoring] Ended.");
     Ok(())
 }
