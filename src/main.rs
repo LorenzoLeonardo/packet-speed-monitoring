@@ -75,7 +75,7 @@ async fn listen_packets(
         .unwrap()
         .promisc(true)
         .snaplen(65535)
-        .timeout(10_000)
+        .timeout(500)
         .immediate_mode(true)
         .open()
         .unwrap();
@@ -105,6 +105,9 @@ async fn listen_packets(
                             stats.entry(dst).or_default().download_bytes += size;
                         }
                     }
+                }
+                Err(pcap::Error::TimeoutExpired) => {
+                    // nothing arrived this interval, continue
                 }
                 Err(e) => eprintln!("{e}"),
             }
