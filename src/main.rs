@@ -1,3 +1,5 @@
+mod logger;
+
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::{
@@ -64,7 +66,7 @@ async fn listen_packets(
     shutdown: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let device = Device::lookup().expect("No device found").unwrap();
-    println!("Sniffing on device: {:?}", device.name);
+    log::info!("Sniffing on device: {:?}", device.name);
     let mut cap = Capture::from_device(device)
         .unwrap()
         .promisc(true)
@@ -79,7 +81,7 @@ async fn listen_packets(
 
         loop {
             if shutdown.load(Ordering::Relaxed) {
-                eprintln!("shutdown requested: exiting pcap loop");
+                log::info!("shutdown requested: exiting pcap loop");
                 break;
             }
 
@@ -100,11 +102,13 @@ async fn listen_packets(
             }
 
             if last.elapsed() >= Duration::from_millis(500) {
-                println!("--- Traffic Report ---");
+                log::debug!("--- Traffic Report ---");
                 for (ip, s) in stats.iter_mut() {
                     let up_mbps = (s.upload_bytes as f64 * 8.0) / 1_000_000.0;
                     let down_mbps = (s.download_bytes as f64 * 8.0) / 1_000_000.0;
-                    println!("{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps");
+                    log::debug!(
+                        "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
+                    );
                     let _ = tx.send(SpeedInfo::new(ip.to_string().as_str(), down_mbps, up_mbps));
                     s.upload_bytes = 0;
                     s.download_bytes = 0;
@@ -112,7 +116,7 @@ async fn listen_packets(
                 last = Instant::now();
             }
         }
-        println!("[listen_packets] pcap thread exiting cleanly");
+        log::info!("[listen_packets] pcap thread exiting cleanly");
     })
 }
 
@@ -125,23 +129,23 @@ async fn publish_speed_info(
     Ok(tokio::spawn(async move {
         loop {
             if shutdown.load(Ordering::Relaxed) {
-                eprintln!("shutdown requested: exiting pcap loop");
+                log::info!("shutdown requested: exiting pcap loop");
                 break;
             }
             match rx.recv().await {
                 Some(val) => {
-                    println!("signal received: {val:?}");
+                    log::debug!("signal received: {val:?}");
                     if let Ok(value) = serde_json::to_value(&val) {
                         let _ = client
                             .publish("application.lan.speed", "speedInfo", &value)
                             .await;
                     } else {
-                        println!("[publish_speed_info] parse error to Value.");
+                        log::error!("[publish_speed_info] parse error to Value.");
                         break;
                     }
                 }
                 None => {
-                    println!("[publish_speed_info] rx channel closed, exiting...");
+                    log::info!("[publish_speed_info] rx channel closed, exiting...");
                     break;
                 }
             }
@@ -159,10 +163,10 @@ async fn wait_until_signal() {
 
         tokio::select! {
             _ = term.recv() => {
-                println!("Received SIGTERM (systemd stop).");
+                log::info!("Received SIGTERM (systemd stop).");
             }
             _ = int.recv() => {
-                println!("Received SIGINT (Ctrl+C).");
+                log::info!("Received SIGINT (Ctrl+C).");
             }
         }
     }
@@ -173,20 +177,25 @@ async fn wait_until_signal() {
         tokio::signal::ctrl_c()
             .await
             .expect("Failed to install Ctrl+C handler");
-        println!("Received Ctrl+C (Windows)");
+        log::info!("Received Ctrl+C (Windows)");
     }
 }
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    println!("[packet-speed-monitoring] Started.");
+    logger::setup_logger();
+
+    let name = env!("CARGO_PKG_NAME");
+    let version = env!("CARGO_PKG_VERSION");
+    log::info!("{name} has started v{version}...");
+
     let (tx, rx) = unbounded_channel();
     let shutdown = Arc::new(AtomicBool::new(false));
 
     let publisher_handle = publish_speed_info(rx, shutdown.clone()).await?;
     let packet_listener_handle = listen_packets(tx, shutdown.clone()).await;
 
-    println!("Sniffer started. Press Ctrl+C to stop.");
+    log::info!("Sniffer started. Press Ctrl+C to stop.");
 
     // wait here until signal is sent
     wait_until_signal().await;
@@ -199,9 +208,9 @@ async fn main() -> std::io::Result<()> {
 
     for (i, res) in [result1, result2].into_iter().enumerate() {
         if let Err(e) = res {
-            eprintln!("Task {i} failed: {e}");
+            log::error!("Task {i} failed: {e}");
         }
     }
-    println!("[packet-speed-monitoring] Ended.");
+    log::info!("[packet-speed-monitoring] Ended.");
     Ok(())
 }
