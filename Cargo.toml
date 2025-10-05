@@ -5,6 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+chrono = "0.4.42"
 etherparse = "0.19"
 ipc-broker = "0.1.8"
 pcap = "2.3"

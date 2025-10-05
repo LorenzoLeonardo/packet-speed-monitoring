@@ -6,6 +6,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use chrono::{FixedOffset, Local, Offset, Utc};
 use etherparse::Ipv4HeaderSlice;
 use ipc_broker::client::ClientHandle;
 use pcap::{Capture, Device};
@@ -19,11 +20,43 @@ struct Stats {
     download_bytes: usize,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct SpeedInfo {
     ip: String,
-    dspeed: f64,
-    uspeed: f64,
+    mbps_down: f64,
+    mbps_up: f64,
+    time_local: String,
+    time_utc: String,
+    timezone: String,
+}
+
+impl SpeedInfo {
+    pub fn new(ip: &str, down: f64, up: f64) -> Self {
+        let timestamp = Utc::now();
+        let local_time = Local::now();
+
+        // Compute offset between local time and UTC
+        let offset_seconds = local_time.offset().fix().local_minus_utc();
+        let hours = offset_seconds / 3600;
+        let minutes = (offset_seconds.abs() % 3600) / 60;
+
+        let sign = if offset_seconds >= 0 { '+' } else { '-' };
+        let timezone = format!("UTC{}{:02}:{:02}", sign, hours.abs(), minutes);
+
+        // Create FixedOffset and convert UTC → local
+        let fixed_offset =
+            FixedOffset::east_opt(offset_seconds).unwrap_or(FixedOffset::east_opt(0).unwrap());
+        let local_time_str = timestamp.with_timezone(&fixed_offset).to_rfc3339();
+
+        Self {
+            ip: ip.to_string(),
+            mbps_down: down,
+            mbps_up: up,
+            time_local: local_time_str,
+            time_utc: timestamp.to_rfc3339(),
+            timezone,
+        }
+    }
 }
 
 async fn listen_packets(
@@ -71,16 +104,8 @@ async fn listen_packets(
                 for (ip, s) in stats.iter_mut() {
                     let up_mbps = (s.upload_bytes as f64 * 8.0) / 1_000_000.0;
                     let down_mbps = (s.download_bytes as f64 * 8.0) / 1_000_000.0;
-                    if up_mbps > 0.01 || down_mbps > 0.01 {
-                        println!(
-                            "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
-                        );
-                        let _ = tx.send(SpeedInfo {
-                            ip: ip.to_string(),
-                            dspeed: down_mbps,
-                            uspeed: up_mbps,
-                        });
-                    }
+                    println!("{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps");
+                    let _ = tx.send(SpeedInfo::new(ip.to_string().as_str(), down_mbps, up_mbps));
                     s.upload_bytes = 0;
                     s.download_bytes = 0;
                 }
