@@ -12,6 +12,7 @@ use chrono::{FixedOffset, Local, Offset, Utc};
 use etherparse::Ipv4HeaderSlice;
 use ipc_broker::client::ClientHandle;
 use pcap::{Capture, Device};
+use pnet::datalink;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{self, JoinHandle};
@@ -61,6 +62,34 @@ impl SpeedInfo {
     }
 }
 
+/// Detect local IPv4 address and subnet mask (first non-loopback interface)
+fn detect_local_subnet() -> Option<(Ipv4Addr, Ipv4Addr)> {
+    for iface in datalink::interfaces() {
+        if iface.is_loopback() {
+            continue;
+        }
+        for ip in iface.ips {
+            if let pnet::ipnetwork::IpNetwork::V4(net) = ip {
+                log::info!("Detected interface: {}", iface.name);
+                log::info!("Local IP: {}", net.ip());
+                log::info!("Subnet mask: {}", net.mask());
+                return Some((net.ip(), net.mask()));
+            }
+        }
+    }
+    None
+}
+
+/// Check if an IP is in the given subnet
+fn ip_in_subnet(ip: Ipv4Addr, subnet: Ipv4Addr, mask: Ipv4Addr) -> bool {
+    (u32::from(ip) & u32::from(mask)) == (u32::from(subnet) & u32::from(mask))
+}
+
+/// Compute the network address from IP and mask
+fn network_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(ip) & u32::from(mask))
+}
+
 async fn listen_packets(
     tx: UnboundedSender<SpeedInfo>,
     shutdown: Arc<AtomicBool>,
@@ -79,6 +108,16 @@ async fn listen_packets(
         .immediate_mode(true)
         .open()
         .unwrap();
+
+    // Detect local subnet
+    let (subnet, mask) = detect_local_subnet()
+        .map(|(ip, mask)| (network_address(ip, mask), mask))
+        .unwrap_or_else(|| {
+            log::warn!("Could not detect local subnet, sending all IPs");
+            (Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 0))
+        });
+
+    log::info!("Monitoring subnet: {subnet} Mask: {mask}");
 
     task::spawn_blocking(move || {
         let mut last = Instant::now();
@@ -101,8 +140,13 @@ async fn listen_packets(
                             let dst = ip.destination_addr();
                             let size = packet.header.len as usize;
 
-                            stats.entry(src).or_default().upload_bytes += size;
-                            stats.entry(dst).or_default().download_bytes += size;
+                            // Filter only IPs within subnet
+                            if ip_in_subnet(src, subnet, mask) {
+                                stats.entry(src).or_default().upload_bytes += size;
+                            }
+                            if ip_in_subnet(dst, subnet, mask) {
+                                stats.entry(dst).or_default().download_bytes += size;
+                            }
                         }
                     }
                 }
