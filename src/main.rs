@@ -78,7 +78,10 @@ async fn listen_packets(
     task::spawn_blocking(move || {
         let mut last = Instant::now();
         let mut stats = HashMap::<Ipv4Addr, Stats>::new();
-
+        let delay: u64 = std::env::var("PACKET_SPEED_POLL_DELAY_MS")
+            .unwrap_or(1000.to_string())
+            .parse()
+            .unwrap_or(1000);
         loop {
             if shutdown.load(Ordering::Relaxed) {
                 log::info!("shutdown requested: exiting pcap loop");
@@ -101,7 +104,7 @@ async fn listen_packets(
                 Err(e) => eprintln!("{e}"),
             }
 
-            if last.elapsed() >= Duration::from_millis(500) {
+            if last.elapsed() >= Duration::from_millis(delay) {
                 log::debug!("--- Traffic Report ---");
                 for (ip, s) in stats.iter_mut() {
                     let up_mbps = (s.upload_bytes as f64 * 8.0) / 1_000_000.0;
