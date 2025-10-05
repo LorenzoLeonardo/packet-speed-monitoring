@@ -65,12 +65,17 @@ async fn listen_packets(
     tx: UnboundedSender<SpeedInfo>,
     shutdown: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
-    let device = Device::lookup().expect("No device found").unwrap();
-    log::info!("Sniffing on device: {:?}", device.name);
+    let device = find_active_device().expect("No device found");
+    log::info!(
+        "Sniffing on device: {} decscription: {:?}",
+        device.name,
+        device.desc
+    );
     let mut cap = Capture::from_device(device)
         .unwrap()
         .promisc(true)
         .snaplen(65535)
+        .timeout(10_000)
         .immediate_mode(true)
         .open()
         .unwrap();
@@ -183,6 +188,68 @@ async fn wait_until_signal() {
             .expect("Failed to install Ctrl+C handler");
         log::info!("Received Ctrl+C (Windows)");
     }
+}
+
+pub fn find_active_device() -> Option<Device> {
+    // List all available devices
+    let devices = Device::list().ok()?;
+
+    // Common keywords found in active interfaces
+    let keywords = [
+        "wi-fi", "wireless", "ethernet", "lan", "eth", "enp", "eno", "en", "wlp", "wlan",
+    ];
+
+    // Exclude virtual, loopback, or VPN adapters
+    let excluded = [
+        "loopback",
+        "virtual",
+        "vmware",
+        "npcap",
+        "hyper-v",
+        "bluetooth",
+        "tunnel",
+        "vpn",
+    ];
+
+    // Helper to check if a device matches a keyword
+    let matches_keywords = |desc: &str, name: &str| {
+        let desc_l = desc.to_lowercase();
+        let name_l = name.to_lowercase();
+        keywords
+            .iter()
+            .any(|kw| desc_l.contains(kw) || name_l.contains(kw))
+    };
+
+    // Helper to check if a device should be excluded
+    let is_excluded = |desc: &str, name: &str| {
+        let desc_l = desc.to_lowercase();
+        let name_l = name.to_lowercase();
+        excluded
+            .iter()
+            .any(|ex| desc_l.contains(ex) || name_l.contains(ex))
+    };
+
+    // Step 1: Prefer devices that match known patterns and are not excluded
+    if let Some(dev) = devices.iter().find(|d| {
+        let desc = d.desc.as_deref().unwrap_or("");
+        !is_excluded(desc, &d.name) && matches_keywords(desc, &d.name)
+    }) {
+        return Some(dev.clone());
+    }
+
+    // Step 2: Prefer any non-loopback, non-virtual device with addresses
+    if let Some(dev) = devices.iter().find(|d| {
+        let desc = d.desc.as_deref().unwrap_or("");
+        !is_excluded(desc, &d.name) && !d.addresses.is_empty()
+    }) {
+        return Some(dev.clone());
+    }
+
+    // Step 3: As a last resort, return the first non-loopback device
+    devices.into_iter().find(|d| {
+        let desc = d.desc.as_deref().unwrap_or("");
+        !is_excluded(desc, &d.name)
+    })
 }
 
 #[tokio::main]
