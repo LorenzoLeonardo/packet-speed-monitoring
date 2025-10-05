@@ -105,10 +105,11 @@ async fn listen_packets(
             }
 
             if last.elapsed() >= Duration::from_millis(delay) {
+                let elapsed_secs = last.elapsed().as_secs_f64(); // exact elapsed time
                 log::debug!("--- Traffic Report ---");
                 for (ip, s) in stats.iter_mut() {
-                    let up_mbps = (s.upload_bytes as f64 * 8.0) / 1_000_000.0;
-                    let down_mbps = (s.download_bytes as f64 * 8.0) / 1_000_000.0;
+                    let up_mbps = (s.upload_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
+                    let down_mbps = (s.download_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
                     log::debug!(
                         "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
                     );
