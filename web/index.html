@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>LAN Speed Monitor</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      background: #fafafa;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+      text-align: left;
+    }
+
+    th {
+      background: #eee;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>LAN Speed Monitor</h1>
+  <table id="speed-table">
+    <thead>
+      <tr>
+        <th>IP</th>
+        <th>Download (Mbps)</th>
+        <th>Upload (Mbps)</th>
+        <th>Local Time</th>
+        <th>UTC Time</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const evtSource = new EventSource("/events");
+    const tbody = document.querySelector("#speed-table tbody");
+
+    evtSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const existingRow = document.querySelector(`tr[data-ip="${data.ip}"]`);
+
+        if (existingRow) {
+          // Update existing row
+          existingRow.children[1].textContent = data.mbps_down.toFixed(3);
+          existingRow.children[2].textContent = data.mbps_up.toFixed(3);
+          existingRow.children[3].textContent = data.time_local;
+          existingRow.children[4].textContent = data.time_utc;
+        } else {
+          // Create a new row
+          const row = document.createElement("tr");
+          row.setAttribute("data-ip", data.ip);
+          row.innerHTML = `
+            <td>${data.ip}</td>
+            <td>${data.mbps_down.toFixed(3)}</td>
+            <td>${data.mbps_up.toFixed(3)}</td>
+            <td>${data.time_local}</td>
+            <td>${data.time_utc}</td>
+          `;
+
+          tbody.appendChild(row);
+        }
+
+        // Optional: keep table trimmed (if you expect many IPs)
+        if (tbody.children.length > 100) {
+          tbody.removeChild(tbody.firstChild);
+        }
+
+      } catch (err) {
+        console.error("Bad JSON", event.data);
+      }
+    };
+  </script>
+</body>
+
+</html>
