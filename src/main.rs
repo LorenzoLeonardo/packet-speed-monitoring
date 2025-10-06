@@ -64,85 +64,6 @@ impl SpeedInfo {
     }
 }
 
-/// Detect local IPv4 address and subnet mask (first non-loopback interface)
-pub fn detect_local_subnet() -> Option<(Ipv4Addr, Ipv4Addr)> {
-    let keywords = [
-        "wi-fi", "wireless", "ethernet", "lan", "eth", "enp", "eno", "en", "wlp", "wlan",
-    ];
-    let excluded = [
-        "loopback",
-        "virtual",
-        "vmware",
-        "npcap",
-        "hyper-v",
-        "bluetooth",
-        "tunnel",
-        "vpn",
-    ];
-
-    // Collect candidate interfaces
-    let mut candidates = vec![];
-
-    for iface in datalink::interfaces() {
-        let name_lower = iface.name.to_lowercase();
-        let desc_lower = iface.description.clone().to_lowercase();
-
-        // Skip excluded interfaces
-        if excluded
-            .iter()
-            .any(|ex| name_lower.contains(ex) || desc_lower.contains(ex))
-        {
-            continue;
-        }
-
-        // Only allow matching keywords
-        if !keywords
-            .iter()
-            .any(|kw| name_lower.contains(kw) || desc_lower.contains(kw))
-        {
-            continue;
-        }
-
-        // Find the first IPv4 address
-        for ip in iface.ips {
-            if let IpNetwork::V4(net) = ip {
-                log::info!("Detected interface: {}", iface.name);
-                log::info!("   ↳ Description: {}", iface.description);
-                log::info!("   ↳ Local IP: {}", net.ip());
-                log::info!("   ↳ Subnet mask: {}", net.mask());
-                candidates.push((iface.name.clone(), net.ip(), net.mask()));
-            }
-        }
-    }
-
-    // Prioritize wired/wireless over generic matches
-    if let Some((name, ip, mask)) = candidates.iter().find(|(name, _, _)| {
-        name.contains("eth") || name.contains("en") || name.contains("wlp") || name.contains("wlan")
-    }) {
-        log::info!("Selected primary interface: {}", name);
-        return Some((*ip, *mask));
-    }
-
-    // Fallback to any detected interface
-    if let Some((name, ip, mask)) = candidates.first() {
-        log::info!("Fallback interface: {}", name);
-        return Some((*ip, *mask));
-    }
-
-    log::warn!("No suitable network interface found");
-    None
-}
-
-/// Check if an IP is in the given subnet
-fn ip_in_subnet(ip: Ipv4Addr, subnet: Ipv4Addr, mask: Ipv4Addr) -> bool {
-    (u32::from(ip) & u32::from(mask)) == (u32::from(subnet) & u32::from(mask))
-}
-
-/// Compute the network address from IP and mask
-fn network_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
-    Ipv4Addr::from(u32::from(ip) & u32::from(mask))
-}
-
 async fn listen_packets(
     tx: UnboundedSender<SpeedInfo>,
     shutdown: Arc<AtomicBool>,
@@ -290,65 +211,108 @@ async fn wait_until_signal() {
     }
 }
 
+/// Check if an IP is in the given subnet
+fn ip_in_subnet(ip: Ipv4Addr, subnet: Ipv4Addr, mask: Ipv4Addr) -> bool {
+    (u32::from(ip) & u32::from(mask)) == (u32::from(subnet) & u32::from(mask))
+}
+
+/// Compute the network address from IP and mask
+fn network_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(ip) & u32::from(mask))
+}
+
+/// Common keywords and exclusions used to identify real network interfaces
+const KEYWORDS: [&str; 10] = [
+    "wi-fi", "wireless", "ethernet", "lan", "eth", "enp", "eno", "en", "wlp", "wlan",
+];
+const EXCLUDED: [&str; 8] = [
+    "loopback",
+    "virtual",
+    "vmware",
+    "npcap",
+    "hyper-v",
+    "bluetooth",
+    "tunnel",
+    "vpn",
+];
+
+/// Returns true if an interface/device name+desc matches known keywords
+fn matches_keywords(name: &str, desc: &str) -> bool {
+    let name = name.to_lowercase();
+    let desc = desc.to_lowercase();
+    KEYWORDS
+        .iter()
+        .any(|kw| name.contains(kw) || desc.contains(kw))
+}
+
+/// Returns true if an interface/device name+desc should be excluded
+fn is_excluded(name: &str, desc: &str) -> bool {
+    let name = name.to_lowercase();
+    let desc = desc.to_lowercase();
+    EXCLUDED
+        .iter()
+        .any(|ex| name.contains(ex) || desc.contains(ex))
+}
+
+/// Detect the active pcap device
 pub fn find_active_device() -> Option<Device> {
-    // List all available devices
     let devices = Device::list().ok()?;
 
-    // Common keywords found in active interfaces
-    let keywords = [
-        "wi-fi", "wireless", "ethernet", "lan", "eth", "enp", "eno", "en", "wlp", "wlan",
-    ];
+    devices
+        .iter()
+        .find(|d| {
+            let desc = d.desc.as_deref().unwrap_or("");
+            !is_excluded(&d.name, desc) && matches_keywords(&d.name, desc)
+        })
+        .cloned()
+        // fallback: any non-loopback device
+        .or_else(|| {
+            devices
+                .iter()
+                .find(|d| {
+                    let desc = d.desc.as_deref().unwrap_or("");
+                    !is_excluded(&d.name, desc) && !d.addresses.is_empty()
+                })
+                .cloned()
+        })
+}
 
-    // Exclude virtual, loopback, or VPN adapters
-    let excluded = [
-        "loopback",
-        "virtual",
-        "vmware",
-        "npcap",
-        "hyper-v",
-        "bluetooth",
-        "tunnel",
-        "vpn",
-    ];
+/// Detect local IPv4 subnet from datalink interfaces
+pub fn detect_local_subnet() -> Option<(Ipv4Addr, Ipv4Addr)> {
+    let mut candidates = vec![];
 
-    // Helper to check if a device matches a keyword
-    let matches_keywords = |desc: &str, name: &str| {
-        let desc_l = desc.to_lowercase();
-        let name_l = name.to_lowercase();
-        keywords
-            .iter()
-            .any(|kw| desc_l.contains(kw) || name_l.contains(kw))
-    };
+    for iface in datalink::interfaces() {
+        if is_excluded(&iface.name, &iface.description)
+            || !matches_keywords(&iface.name, &iface.description)
+        {
+            continue;
+        }
 
-    // Helper to check if a device should be excluded
-    let is_excluded = |desc: &str, name: &str| {
-        let desc_l = desc.to_lowercase();
-        let name_l = name.to_lowercase();
-        excluded
-            .iter()
-            .any(|ex| desc_l.contains(ex) || name_l.contains(ex))
-    };
-
-    // Step 1: Prefer devices that match known patterns and are not excluded
-    if let Some(dev) = devices.iter().find(|d| {
-        let desc = d.desc.as_deref().unwrap_or("");
-        !is_excluded(desc, &d.name) && matches_keywords(desc, &d.name)
-    }) {
-        return Some(dev.clone());
+        for ip in iface.ips {
+            if let IpNetwork::V4(net) = ip {
+                log::info!("Detected interface: {}", iface.name);
+                log::info!("   ↳ Description: {}", iface.description);
+                log::info!("   ↳ Local IP: {}", net.ip());
+                log::info!("   ↳ Subnet mask: {}", net.mask());
+                candidates.push((iface.name.clone(), net.ip(), net.mask()));
+            }
+        }
     }
 
-    // Step 2: Prefer any non-loopback, non-virtual device with addresses
-    if let Some(dev) = devices.iter().find(|d| {
-        let desc = d.desc.as_deref().unwrap_or("");
-        !is_excluded(desc, &d.name) && !d.addresses.is_empty()
+    // Prefer wired/wireless
+    if let Some((name, ip, mask)) = candidates.iter().find(|(name, _, _)| {
+        ["eth", "en", "wlp", "wlan"]
+            .iter()
+            .any(|kw| name.contains(kw))
     }) {
-        return Some(dev.clone());
+        log::info!("Selected primary interface: {name}");
+        return Some((*ip, *mask));
     }
 
-    // Step 3: As a last resort, return the first non-loopback device
-    devices.into_iter().find(|d| {
-        let desc = d.desc.as_deref().unwrap_or("");
-        !is_excluded(desc, &d.name)
+    // Fallback
+    candidates.first().map(|(name, ip, mask)| {
+        log::info!("Fallback interface: {name}");
+        (*ip, *mask)
     })
 }
 
