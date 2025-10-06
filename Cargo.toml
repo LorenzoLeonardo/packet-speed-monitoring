@@ -5,9 +5,12 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+axum = {version = "0.8", features = ["macros"]}
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 chrono = "0.4"
 etherparse = "0.19"
 fern = "0.7"
+futures = "0.3"
 ipc-broker = "0.1"
 log = "0.4"
 pcap = "2.3"
@@ -15,3 +18,4 @@ pnet = "0.35"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.47", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }

@@ -1,4 +1,5 @@
 mod logger;
+mod webserver;
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -319,18 +320,22 @@ async fn main() -> std::io::Result<()> {
     let publisher_handle = publish_speed_info(rx, shutdown.clone()).await?;
     let packet_listener_handle = listen_packets(tx, shutdown.clone()).await;
 
+    let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
+    let webserver_handle = webserver::spawn_webserver(shut_webserver_rx).await;
+
     log::info!("Sniffer started. Press Ctrl+C to stop.");
 
     // wait here until signal is sent
     wait_until_signal().await;
-
+    let _ = shut_webserver_tx.send(true);
     // Set to true to signal the task to exit properly
     shutdown.store(true, Ordering::Relaxed);
 
     // wait for blocking thread to end
-    let (result1, result2) = tokio::join!(packet_listener_handle, publisher_handle);
+    let (result1, result2, result3) =
+        tokio::join!(packet_listener_handle, publisher_handle, webserver_handle);
 
-    for (i, res) in [result1, result2].into_iter().enumerate() {
+    for (i, res) in [result1, result2, result3].into_iter().enumerate() {
         if let Err(e) = res {
             log::error!("Task {i} failed: {e}");
         }
