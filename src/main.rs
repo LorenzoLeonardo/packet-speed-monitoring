@@ -307,6 +307,12 @@ async fn main() -> std::io::Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     log::info!("{name} has started v{version}...");
 
+    let client = ClientHandle::connect().await?;
+
+    log::info!("Waiting for rob . . .");
+    client.wait_for_object("rob").await?;
+    log::info!("rob has started . . .");
+
     let (tx, rx) = unbounded_channel();
     let shutdown = Arc::new(AtomicBool::new(false));
 
