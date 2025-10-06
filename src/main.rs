@@ -14,6 +14,7 @@ use etherparse::Ipv4HeaderSlice;
 use ipc_broker::client::ClientHandle;
 use pcap::{Capture, Device};
 use pnet::datalink;
+use pnet::ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{self, JoinHandle};
@@ -64,20 +65,71 @@ impl SpeedInfo {
 }
 
 /// Detect local IPv4 address and subnet mask (first non-loopback interface)
-fn detect_local_subnet() -> Option<(Ipv4Addr, Ipv4Addr)> {
+pub fn detect_local_subnet() -> Option<(Ipv4Addr, Ipv4Addr)> {
+    let keywords = [
+        "wi-fi", "wireless", "ethernet", "lan", "eth", "enp", "eno", "en", "wlp", "wlan",
+    ];
+    let excluded = [
+        "loopback",
+        "virtual",
+        "vmware",
+        "npcap",
+        "hyper-v",
+        "bluetooth",
+        "tunnel",
+        "vpn",
+    ];
+
+    // Collect candidate interfaces
+    let mut candidates = vec![];
+
     for iface in datalink::interfaces() {
-        if iface.is_loopback() {
+        let name_lower = iface.name.to_lowercase();
+        let desc_lower = iface.description.clone().to_lowercase();
+
+        // Skip excluded interfaces
+        if excluded
+            .iter()
+            .any(|ex| name_lower.contains(ex) || desc_lower.contains(ex))
+        {
             continue;
         }
+
+        // Only allow matching keywords
+        if !keywords
+            .iter()
+            .any(|kw| name_lower.contains(kw) || desc_lower.contains(kw))
+        {
+            continue;
+        }
+
+        // Find the first IPv4 address
         for ip in iface.ips {
-            if let pnet::ipnetwork::IpNetwork::V4(net) = ip {
+            if let IpNetwork::V4(net) = ip {
                 log::info!("Detected interface: {}", iface.name);
-                log::info!("Local IP: {}", net.ip());
-                log::info!("Subnet mask: {}", net.mask());
-                return Some((net.ip(), net.mask()));
+                log::info!("   ↳ Description: {}", iface.description);
+                log::info!("   ↳ Local IP: {}", net.ip());
+                log::info!("   ↳ Subnet mask: {}", net.mask());
+                candidates.push((iface.name.clone(), net.ip(), net.mask()));
             }
         }
     }
+
+    // Prioritize wired/wireless over generic matches
+    if let Some((name, ip, mask)) = candidates.iter().find(|(name, _, _)| {
+        name.contains("eth") || name.contains("en") || name.contains("wlp") || name.contains("wlan")
+    }) {
+        log::info!("Selected primary interface: {}", name);
+        return Some((*ip, *mask));
+    }
+
+    // Fallback to any detected interface
+    if let Some((name, ip, mask)) = candidates.first() {
+        log::info!("Fallback interface: {}", name);
+        return Some((*ip, *mask));
+    }
+
+    log::warn!("No suitable network interface found");
     None
 }
 
@@ -135,19 +187,19 @@ async fn listen_packets(
 
             match cap.next_packet() {
                 Ok(packet) => {
-                    if packet.data.len() > 14 {
-                        if let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..]) {
-                            let src = ip.source_addr();
-                            let dst = ip.destination_addr();
-                            let size = packet.header.len as usize;
+                    if packet.data.len() > 14
+                        && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
+                    {
+                        let src = ip.source_addr();
+                        let dst = ip.destination_addr();
+                        let size = packet.header.len as usize;
 
-                            // Filter only IPs within subnet
-                            if ip_in_subnet(src, subnet, mask) {
-                                stats.entry(src).or_default().upload_bytes += size;
-                            }
-                            if ip_in_subnet(dst, subnet, mask) {
-                                stats.entry(dst).or_default().download_bytes += size;
-                            }
+                        // Filter only IPs within subnet
+                        if ip_in_subnet(src, subnet, mask) {
+                            stats.entry(src).or_default().upload_bytes += size;
+                        }
+                        if ip_in_subnet(dst, subnet, mask) {
+                            stats.entry(dst).or_default().download_bytes += size;
                         }
                     }
                 }

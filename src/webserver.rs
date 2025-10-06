@@ -45,16 +45,14 @@ pub async fn spawn_webserver(mut shutdown_rx: watch::Receiver<bool>) -> JoinHand
             .with_state(state);
 
         // Start server
-        log::info!("SSE Push Server running at http://127.0.0.1:5246");
+        log::info!("SSE Push Server running at http://0.0.0.0:5247");
         axum::serve(
-            tokio::net::TcpListener::bind("127.0.0.1:5246")
-                .await
-                .unwrap(),
+            tokio::net::TcpListener::bind("0.0.0.0:5247").await.unwrap(),
             app,
         )
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.changed().await;
-            println!("🛑 Oneshot: shutdown signal received!");
+            log::info!("Oneshot: shutdown signal received!");
         })
         .await
         .unwrap();
