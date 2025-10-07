@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{self, JoinHandle};
 
+const SNAPLEN_SPEED_MONITOR: i32 = 128;
+
 #[derive(Default)]
 struct Stats {
     upload_bytes: usize,
@@ -104,7 +106,7 @@ async fn listen_packets(
     let mut cap = Capture::from_device(device)
         .unwrap()
         .promisc(true)
-        .snaplen(65535)
+        .snaplen(SNAPLEN_SPEED_MONITOR)
         .timeout(500)
         .immediate_mode(true)
         .open()
