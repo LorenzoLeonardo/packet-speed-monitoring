@@ -49,10 +49,11 @@
         <th>Upload (Mbps)</th>
         <th>Local Time</th>
         <th>UTC Time</th>
+        <th>Timezone</th>
         <th>Max Download (Mbps)</th>
-        <th>Max Down Time</th>
+        <th>Max Down Time (Local)</th>
         <th>Max Upload (Mbps)</th>
-        <th>Max Up Time</th>
+        <th>Max Up Time (Local)</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -65,11 +66,18 @@
     evtSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        const existingRow = document.querySelector(`tr[data-ip="${data.ip}"]`);
 
-        const isoTime = data.time_local.replace(/(\.\d{3})\d+/, '$1');
-        const date = new Date(isoTime);
-        const options = {
+        // Access the nested structs
+        const curr = data.current;
+        const max = data.max;
+
+        const ip = curr.ip;
+
+        // Format times
+        const dateLocal = new Date(curr.time_local);
+        const dateUtc = new Date(curr.time_utc);
+        const dateMaxLocal = new Date(max.time_local);
+        const opts = {
           year: "numeric",
           month: "short",
           day: "numeric",
@@ -78,55 +86,52 @@
           second: "2-digit",
           hour12: true,
         };
-        const localTimeStr = date.toLocaleString("en-US", options);
-        const utcTimeStr = data.time_utc.replace(/(\.\d{3})\d+/, '$1');
+
+        const localTimeStr = dateLocal.toLocaleString("en-US", opts);
+        const utcTimeStr = dateUtc.toLocaleString("en-US", opts);
+        const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", opts);
+        const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", opts);
+
+        // Format values
+        const down = curr.mbps_down.toFixed(3);
+        const up = curr.mbps_up.toFixed(3);
+        const maxDown = max.mbps_down.toFixed(3);
+        const maxUp = max.mbps_up.toFixed(3);
+
+        const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
 
         if (existingRow) {
-          const currDown = parseFloat(existingRow.children[1].textContent);
-          const currUp = parseFloat(existingRow.children[2].textContent);
-          const maxDown = parseFloat(existingRow.children[5].textContent);
-          const maxUp = parseFloat(existingRow.children[7].textContent);
-
-          const newDown = data.mbps_down.toFixed(3);
-          const newUp = data.mbps_up.toFixed(3);
-
-          // Update current speeds
-          existingRow.children[1].textContent = newDown;
-          existingRow.children[2].textContent = newUp;
-          existingRow.children[3].textContent = localTimeStr;
-          existingRow.children[4].textContent = utcTimeStr;
-
-          // Replace max values if higher and record time
-          if (data.mbps_down > maxDown) {
-            existingRow.children[5].textContent = newDown;
-            existingRow.children[6].textContent = localTimeStr;
-          }
-          if (data.mbps_up > maxUp) {
-            existingRow.children[7].textContent = newUp;
-            existingRow.children[8].textContent = localTimeStr;
-          }
-
-        } else {
-          // Create new row
-          const row = document.createElement("tr");
-          row.setAttribute("data-ip", data.ip);
-          const down = data.mbps_down.toFixed(3);
-          const up = data.mbps_up.toFixed(3);
-          row.innerHTML = `
-            <td>${data.ip}</td>
+          existingRow.innerHTML = `
+            <td>${ip}</td>
             <td>${down}</td>
             <td>${up}</td>
             <td>${localTimeStr}</td>
             <td>${utcTimeStr}</td>
+            <td>${curr.timezone}</td>
+            <td>${maxDown}</td>
+            <td>${maxDownTimeStr}</td>
+            <td>${maxUp}</td>
+            <td>${maxUpTimeStr}</td>
+          `;
+        } else {
+          const row = document.createElement("tr");
+          row.setAttribute("data-ip", ip);
+          row.innerHTML = `
+            <td>${ip}</td>
             <td>${down}</td>
-            <td>${localTimeStr}</td>
             <td>${up}</td>
             <td>${localTimeStr}</td>
+            <td>${utcTimeStr}</td>
+            <td>${curr.timezone}</td>
+            <td>${maxDown}</td>
+            <td>${maxDownTimeStr}</td>
+            <td>${maxUp}</td>
+            <td>${maxUpTimeStr}</td>
           `;
           tbody.appendChild(row);
         }
 
-        // Sort rows alphabetically by IP
+        // Sort alphabetically by IP
         const rows = Array.from(tbody.querySelectorAll("tr"));
         rows.sort((a, b) => {
           const ipA = a.getAttribute("data-ip");
@@ -135,13 +140,8 @@
         });
         rows.forEach(row => tbody.appendChild(row));
 
-        // Optional: keep table trimmed
-        if (tbody.children.length > 100) {
-          tbody.removeChild(tbody.firstChild);
-        }
-
       } catch (err) {
-        console.error("Bad JSON", event.data);
+        console.error("Bad JSON", event.data, err);
       }
     };
   </script>
