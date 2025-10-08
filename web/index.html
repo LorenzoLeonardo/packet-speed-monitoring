@@ -36,7 +36,6 @@
     h1 {
       color: #0d47a1;
     }
-
   </style>
 </head>
 
@@ -50,6 +49,10 @@
         <th>Upload (Mbps)</th>
         <th>Local Time</th>
         <th>UTC Time</th>
+        <th>Max Download (Mbps)</th>
+        <th>Max Down Time</th>
+        <th>Max Upload (Mbps)</th>
+        <th>Max Up Time</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -68,30 +71,57 @@
         const date = new Date(isoTime);
         const options = {
           year: "numeric",
-          month: "long",
+          month: "short",
           day: "numeric",
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
           hour12: true,
         };
+        const localTimeStr = date.toLocaleString("en-US", options);
+        const utcTimeStr = data.time_utc.replace(/(\.\d{3})\d+/, '$1');
 
         if (existingRow) {
-          // Update existing row
-          existingRow.children[1].textContent = data.mbps_down.toFixed(3);
-          existingRow.children[2].textContent = data.mbps_up.toFixed(3);
-          existingRow.children[3].textContent = date.toLocaleString("en-US", options);
-          existingRow.children[4].textContent = data.time_utc.replace(/(\.\d{3})\d+/, '$1');
+          const currDown = parseFloat(existingRow.children[1].textContent);
+          const currUp = parseFloat(existingRow.children[2].textContent);
+          const maxDown = parseFloat(existingRow.children[5].textContent);
+          const maxUp = parseFloat(existingRow.children[7].textContent);
+
+          const newDown = data.mbps_down.toFixed(3);
+          const newUp = data.mbps_up.toFixed(3);
+
+          // Update current speeds
+          existingRow.children[1].textContent = newDown;
+          existingRow.children[2].textContent = newUp;
+          existingRow.children[3].textContent = localTimeStr;
+          existingRow.children[4].textContent = utcTimeStr;
+
+          // Replace max values if higher and record time
+          if (data.mbps_down > maxDown) {
+            existingRow.children[5].textContent = newDown;
+            existingRow.children[6].textContent = localTimeStr;
+          }
+          if (data.mbps_up > maxUp) {
+            existingRow.children[7].textContent = newUp;
+            existingRow.children[8].textContent = localTimeStr;
+          }
+
         } else {
-          // Create a new row
+          // Create new row
           const row = document.createElement("tr");
           row.setAttribute("data-ip", data.ip);
+          const down = data.mbps_down.toFixed(3);
+          const up = data.mbps_up.toFixed(3);
           row.innerHTML = `
             <td>${data.ip}</td>
-            <td>${data.mbps_down.toFixed(3)}</td>
-            <td>${data.mbps_up.toFixed(3)}</td>
-            <td>${date.toLocaleString("en-US", options)}</td>
-            <td>${data.time_utc}</td>
+            <td>${down}</td>
+            <td>${up}</td>
+            <td>${localTimeStr}</td>
+            <td>${utcTimeStr}</td>
+            <td>${down}</td>
+            <td>${localTimeStr}</td>
+            <td>${up}</td>
+            <td>${localTimeStr}</td>
           `;
           tbody.appendChild(row);
         }
@@ -103,8 +133,6 @@
           const ipB = b.getAttribute("data-ip");
           return ipA.localeCompare(ipB, undefined, { numeric: true });
         });
-
-        // Re-append rows in sorted order
         rows.forEach(row => tbody.appendChild(row));
 
         // Optional: keep table trimmed
