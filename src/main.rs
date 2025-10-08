@@ -3,6 +3,7 @@ mod logger;
 mod webserver;
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::Ipv4Addr;
 use std::sync::{
     Arc,
@@ -32,7 +33,7 @@ struct Stats {
     download_bytes: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct SpeedInfo {
     ip: String,
     mbps_down: f64,
@@ -40,6 +41,66 @@ struct SpeedInfo {
     time_local: String,
     time_utc: String,
     timezone: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BroadcastData {
+    current: SpeedInfo,
+    max: SpeedInfo,
+}
+
+/// Update in-memory max speeds (per IP)
+fn update_max_speed_local(map: &mut HashMap<Ipv4Addr, SpeedInfo>, data: &SpeedInfo) {
+    // If IP fails to parse, skip the update (avoid inserting 0.0.0.0 entries)
+    let ip: Ipv4Addr = match data.ip.parse() {
+        Ok(ip) => ip,
+        Err(_) => return,
+    };
+
+    match map.entry(ip) {
+        Entry::Occupied(mut e) => {
+            let max = e.get_mut();
+            let mut changed = false;
+
+            // Update download max independently
+            if data.mbps_down > max.mbps_down {
+                max.mbps_down = data.mbps_down;
+                max.time_local = data.time_local.clone();
+                max.time_utc = data.time_utc.clone();
+                max.timezone = data.timezone.clone();
+                changed = true;
+            }
+
+            // Update upload max independently
+            if data.mbps_up > max.mbps_up {
+                max.mbps_up = data.mbps_up;
+                // Use the same timestamp fields to mark when upload max happened.
+                // If you want separate timestamps for up/down, see note below.
+                max.time_local = data.time_local.clone();
+                max.time_utc = data.time_utc.clone();
+                max.timezone = data.timezone.clone();
+                changed = true;
+            }
+
+            if changed {
+                log::debug!(
+                    "Updated max for {} => down: {:.6}, up: {:.6}",
+                    data.ip,
+                    max.mbps_down,
+                    max.mbps_up
+                );
+            }
+        }
+        Entry::Vacant(e) => {
+            e.insert(data.clone());
+            log::debug!(
+                "Inserted new max record for {} => down: {:.6}, up: {:.6}",
+                data.ip,
+                data.mbps_down,
+                data.mbps_up
+            );
+        }
+    }
 }
 
 impl SpeedInfo {
@@ -72,7 +133,7 @@ impl SpeedInfo {
 }
 
 async fn listen_packets(
-    tx: UnboundedSender<SpeedInfo>,
+    tx: UnboundedSender<BroadcastData>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>> {
     let device = find_active_device().context("No active device found")?;
@@ -101,6 +162,8 @@ async fn listen_packets(
     Ok(task::spawn_blocking(move || {
         let mut last = Instant::now();
         let mut stats = HashMap::<Ipv4Addr, Stats>::new();
+        let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
+
         let delay: u64 = std::env::var("PACKET_SPEED_POLL_DELAY_MS")
             .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
             .parse()
@@ -144,7 +207,19 @@ async fn listen_packets(
                     log::debug!(
                         "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
                     );
-                    let _ = tx.send(SpeedInfo::new(ip.to_string().as_str(), down_mbps, up_mbps));
+
+                    let current = SpeedInfo::new(ip.to_string().as_str(), down_mbps, up_mbps);
+
+                    // update max and create broadcast packet
+                    update_max_speed_local(&mut max_speeds, &current);
+                    let max = max_speeds
+                        .get(ip)
+                        .cloned()
+                        .unwrap_or_else(|| current.clone());
+
+                    let broad_cast = BroadcastData { current, max };
+                    log::trace!("{broad_cast:?}");
+                    let _ = tx.send(broad_cast);
                     s.upload_bytes = 0;
                     s.download_bytes = 0;
                 }
@@ -156,7 +231,7 @@ async fn listen_packets(
 }
 
 async fn publish_speed_info(
-    mut rx: UnboundedReceiver<SpeedInfo>,
+    mut rx: UnboundedReceiver<BroadcastData>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>, std::io::Error> {
     let client = ClientHandle::connect().await?;
