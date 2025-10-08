@@ -5,6 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+anyhow = "1.0"
 axum = {version = "0.8", features = ["macros"]}
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 chrono = "0.4"
