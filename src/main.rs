@@ -130,7 +130,7 @@ async fn listen_packets(
                     }
                 }
                 Err(pcap::Error::TimeoutExpired) => {
-                    log::warn!("next_packet(): TimeoutExpired");
+                    log::debug!("next_packet(): TimeoutExpired");
                 }
                 Err(e) => log::error!("{e}"),
             }
