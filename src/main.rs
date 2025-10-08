@@ -10,6 +10,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use anyhow::{Context, Result};
 use chrono::{FixedOffset, Local, Offset, Utc};
 use etherparse::Ipv4HeaderSlice;
 use ipc_broker::client::ClientHandle;
@@ -73,21 +74,19 @@ impl SpeedInfo {
 async fn listen_packets(
     tx: UnboundedSender<SpeedInfo>,
     shutdown: Arc<AtomicBool>,
-) -> JoinHandle<()> {
-    let device = find_active_device().expect("No device found");
+) -> Result<JoinHandle<()>> {
+    let device = find_active_device().context("No active device found")?;
     log::info!(
         "Sniffing on device: {} decscription: {:?}",
         device.name,
         device.desc
     );
-    let mut cap = Capture::from_device(device)
-        .unwrap()
+    let mut cap = Capture::from_device(device)?
         .promisc(true)
         .snaplen(SNAPLEN_SPEED_MONITOR)
         .timeout(500)
         .immediate_mode(true)
-        .open()
-        .unwrap();
+        .open()?;
 
     // Detect local subnet
     let (subnet, mask) = detect_local_subnet()
@@ -99,7 +98,7 @@ async fn listen_packets(
 
     log::info!("Monitoring subnet: {subnet} Mask: {mask}");
 
-    task::spawn_blocking(move || {
+    Ok(task::spawn_blocking(move || {
         let mut last = Instant::now();
         let mut stats = HashMap::<Ipv4Addr, Stats>::new();
         let delay: u64 = std::env::var("PACKET_SPEED_POLL_DELAY_MS")
@@ -131,9 +130,9 @@ async fn listen_packets(
                     }
                 }
                 Err(pcap::Error::TimeoutExpired) => {
-                    // nothing arrived this interval, continue
+                    log::warn!("next_packet(): TimeoutExpired");
                 }
-                Err(e) => eprintln!("{e}"),
+                Err(e) => log::error!("{e}"),
             }
 
             if last.elapsed() >= Duration::from_millis(delay) {
@@ -153,7 +152,7 @@ async fn listen_packets(
             }
         }
         log::info!("[listen_packets] pcap thread exiting cleanly");
-    })
+    }))
 }
 
 async fn publish_speed_info(
@@ -218,7 +217,7 @@ async fn wait_until_signal() {
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     logger::setup_logger();
 
     let name = env!("CARGO_PKG_NAME");
@@ -235,7 +234,7 @@ async fn main() -> std::io::Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
 
     let publisher_handle = publish_speed_info(rx, shutdown.clone()).await?;
-    let packet_listener_handle = listen_packets(tx, shutdown.clone()).await;
+    let packet_listener_handle = listen_packets(tx, shutdown.clone()).await?;
 
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
     let webserver_handle = webserver::spawn_webserver(shut_webserver_rx).await;
