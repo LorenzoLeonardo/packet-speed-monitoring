@@ -64,11 +64,23 @@
         const data = JSON.parse(event.data);
         const existingRow = document.querySelector(`tr[data-ip="${data.ip}"]`);
 
+        const isoTime = data.time_local.replace(/(\.\d{3})\d+/, '$1');
+        const date = new Date(isoTime);
+        const options = {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        };
+
         if (existingRow) {
           // Update existing row
           existingRow.children[1].textContent = data.mbps_down.toFixed(3);
           existingRow.children[2].textContent = data.mbps_up.toFixed(3);
-          existingRow.children[3].textContent = data.time_local.replace(/(\.\d{3})\d+/, '$1');
+          existingRow.children[3].textContent = date.toLocaleString("en-US", options);
           existingRow.children[4].textContent = data.time_utc.replace(/(\.\d{3})\d+/, '$1');
         } else {
           // Create a new row
@@ -78,7 +90,7 @@
             <td>${data.ip}</td>
             <td>${data.mbps_down.toFixed(3)}</td>
             <td>${data.mbps_up.toFixed(3)}</td>
-            <td>${data.time_local}</td>
+            <td>${date.toLocaleString("en-US", options)}</td>
             <td>${data.time_utc}</td>
           `;
           tbody.appendChild(row);
