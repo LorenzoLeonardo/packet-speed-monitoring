@@ -68,8 +68,8 @@
           // Update existing row
           existingRow.children[1].textContent = data.mbps_down.toFixed(3);
           existingRow.children[2].textContent = data.mbps_up.toFixed(3);
-          existingRow.children[3].textContent = data.time_local;
-          existingRow.children[4].textContent = data.time_utc;
+          existingRow.children[3].textContent = data.time_local.replace(/(\.\d{3})\d+/, '$1');
+          existingRow.children[4].textContent = data.time_utc.replace(/(\.\d{3})\d+/, '$1');
         } else {
           // Create a new row
           const row = document.createElement("tr");
