@@ -133,7 +133,7 @@ impl SpeedInfo {
 }
 
 async fn listen_packets(
-    tx: UnboundedSender<BroadcastData>,
+    tx: UnboundedSender<Vec<BroadcastData>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>> {
     let device = find_active_device().context("No active device found")?;
@@ -201,6 +201,8 @@ async fn listen_packets(
             if last.elapsed() >= Duration::from_millis(delay) {
                 let elapsed_secs = last.elapsed().as_secs_f64(); // exact elapsed time
                 log::debug!("--- Traffic Report ---");
+                // Create a vector to hold all data for this broadcast tick
+                let mut batch: Vec<BroadcastData> = Vec::new();
                 for (ip, s) in stats.iter_mut() {
                     let up_mbps = (s.upload_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
                     let down_mbps = (s.download_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
@@ -219,9 +221,15 @@ async fn listen_packets(
 
                     let broad_cast = BroadcastData { current, max };
                     log::trace!("{broad_cast:?}");
-                    let _ = tx.send(broad_cast);
+                    batch.push(broad_cast);
+
                     s.upload_bytes = 0;
                     s.download_bytes = 0;
+                }
+                // Send the entire batch once per interval
+                if !batch.is_empty() {
+                    log::trace!("Broadcasting {} entries", batch.len());
+                    let _ = tx.send(batch);
                 }
                 last = Instant::now();
             }
@@ -231,7 +239,7 @@ async fn listen_packets(
 }
 
 async fn publish_speed_info(
-    mut rx: UnboundedReceiver<BroadcastData>,
+    mut rx: UnboundedReceiver<Vec<BroadcastData>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>, std::io::Error> {
     let client = ClientHandle::connect().await?;

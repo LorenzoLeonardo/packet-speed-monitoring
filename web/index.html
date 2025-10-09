@@ -95,15 +95,25 @@
 
     evtSource.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        const curr = data.current;
-        const max = data.max;
-        const ip = curr.ip;
+        const batch = JSON.parse(event.data);
 
-        // Store data for rerendering later
-        rowDataMap.set(ip, data);
+        // ✅ Expecting `batch` to be an array of { current, max }
+        if (!Array.isArray(batch)) {
+          console.warn("Unexpected data format:", batch);
+          return;
+        }
 
-        renderRow(ip, curr, max);
+        for (const data of batch) {
+          const curr = data.current;
+          const max = data.max;
+          const ip = curr.ip;
+
+          // Store data for rerendering later
+          rowDataMap.set(ip, data);
+
+          renderRow(ip, curr, max);
+        }
+
         sortTable();
       } catch (err) {
         console.error("Bad JSON", event.data, err);
