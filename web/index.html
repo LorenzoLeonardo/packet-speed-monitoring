@@ -36,24 +36,33 @@
     h1 {
       color: #0d47a1;
     }
+
+    #tz-select {
+      margin-bottom: 10px;
+      padding: 5px;
+      font-size: 14px;
+    }
   </style>
 </head>
 
 <body>
   <h1>Enzo Tech Computer Solutions - LAN Speed Monitor</h1>
+
+  <label for="tz-select"><b>Select Timezone:</b></label>
+  <select id="tz-select"></select>
+
   <table id="speed-table">
     <thead>
       <tr>
         <th>IP</th>
         <th>Download (Mbps)</th>
         <th>Upload (Mbps)</th>
-        <th>Local Time</th>
-        <th>UTC Time</th>
+        <th>Selected TZ Time</th>
         <th>Timezone</th>
         <th>Max Download (Mbps)</th>
-        <th>Max Down Time (Local)</th>
+        <th>Max Down Time (Selected TZ)</th>
         <th>Max Upload (Mbps)</th>
-        <th>Max Up Time (Local)</th>
+        <th>Max Up Time (Selected TZ)</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -62,88 +71,120 @@
   <script>
     const evtSource = new EventSource("/events");
     const tbody = document.querySelector("#speed-table tbody");
+    const tzSelect = document.querySelector("#tz-select");
+
+    // --- Populate timezone dropdown dynamically ---
+    const timeZones = Intl.supportedValuesOf("timeZone");
+    const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    for (const tz of timeZones) {
+      const opt = document.createElement("option");
+      opt.value = tz;
+      opt.textContent = tz;
+      if (tz === localTZ) opt.selected = true;
+      tzSelect.appendChild(opt);
+    }
+
+    let currentTZ = localTZ;
+    tzSelect.addEventListener("change", () => {
+      currentTZ = tzSelect.value;
+      rerenderAllRows(); // refresh table display in new timezone
+    });
+
+    const rowDataMap = new Map(); // store latest data per IP for re-rendering
 
     evtSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-
-        // Access the nested structs
         const curr = data.current;
         const max = data.max;
-
         const ip = curr.ip;
 
-        // Format times
-        const dateLocal = new Date(curr.time_local);
-        const dateUtc = new Date(curr.time_utc);
-        const dateMaxLocal = new Date(max.time_local);
-        const opts = {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-        };
+        // Store data for rerendering later
+        rowDataMap.set(ip, data);
 
-        const localTimeStr = dateLocal.toLocaleString("en-US", opts);
-        const utcTimeStr = dateUtc.toLocaleString("en-US", opts);
-        const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", opts);
-        const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", opts);
-
-        // Format values
-        const down = curr.mbps_down.toFixed(3);
-        const up = curr.mbps_up.toFixed(3);
-        const maxDown = max.mbps_down.toFixed(3);
-        const maxUp = max.mbps_up.toFixed(3);
-
-        const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
-
-        if (existingRow) {
-          existingRow.innerHTML = `
-            <td>${ip}</td>
-            <td>${down}</td>
-            <td>${up}</td>
-            <td>${localTimeStr}</td>
-            <td>${utcTimeStr}</td>
-            <td>${curr.timezone}</td>
-            <td>${maxDown}</td>
-            <td>${maxDownTimeStr}</td>
-            <td>${maxUp}</td>
-            <td>${maxUpTimeStr}</td>
-          `;
-        } else {
-          const row = document.createElement("tr");
-          row.setAttribute("data-ip", ip);
-          row.innerHTML = `
-            <td>${ip}</td>
-            <td>${down}</td>
-            <td>${up}</td>
-            <td>${localTimeStr}</td>
-            <td>${utcTimeStr}</td>
-            <td>${curr.timezone}</td>
-            <td>${maxDown}</td>
-            <td>${maxDownTimeStr}</td>
-            <td>${maxUp}</td>
-            <td>${maxUpTimeStr}</td>
-          `;
-          tbody.appendChild(row);
-        }
-
-        // Sort alphabetically by IP
-        const rows = Array.from(tbody.querySelectorAll("tr"));
-        rows.sort((a, b) => {
-          const ipA = a.getAttribute("data-ip");
-          const ipB = b.getAttribute("data-ip");
-          return ipA.localeCompare(ipB, undefined, { numeric: true });
-        });
-        rows.forEach(row => tbody.appendChild(row));
-
+        renderRow(ip, curr, max);
+        sortTable();
       } catch (err) {
         console.error("Bad JSON", event.data, err);
       }
     };
+
+    function renderRow(ip, curr, max) {
+      const dateLocal = new Date(curr.time_local);
+      const dateMaxLocal = new Date(max.time_local);
+
+      const opts = {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      };
+
+      // 🕒 Format times based on selected timezone
+      const selectedTZTime = dateLocal.toLocaleString("en-US", {
+        ...opts,
+        timeZone: currentTZ,
+      });
+
+      const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", {
+        ...opts,
+        timeZone: currentTZ,
+      });
+
+      const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", {
+        ...opts,
+        timeZone: currentTZ,
+      });
+
+      const down = curr.mbps_down.toFixed(3);
+      const up = curr.mbps_up.toFixed(3);
+      const maxDown = max.mbps_down.toFixed(3);
+      const maxUp = max.mbps_up.toFixed(3);
+
+      const rowHTML = `
+        <td>${ip}</td>
+        <td>${down}</td>
+        <td>${up}</td>
+        <td>${selectedTZTime}</td>
+        <td>${currentTZ}</td>
+        <td>${maxDown}</td>
+        <td>${maxDownTimeStr}</td>
+        <td>${maxUp}</td>
+        <td>${maxUpTimeStr}</td>
+      `;
+
+      const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
+      if (existingRow) {
+        existingRow.innerHTML = rowHTML;
+      } else {
+        const row = document.createElement("tr");
+        row.setAttribute("data-ip", ip);
+        row.innerHTML = rowHTML;
+        tbody.appendChild(row);
+      }
+    }
+
+    function sortTable() {
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort((a, b) => {
+        const ipA = a.getAttribute("data-ip");
+        const ipB = b.getAttribute("data-ip");
+        return ipA.localeCompare(ipB, undefined, { numeric: true });
+      });
+      rows.forEach(row => tbody.appendChild(row));
+    }
+
+    // 🔁 Re-render all rows when timezone changes
+    function rerenderAllRows() {
+      for (const [ip, data] of rowDataMap.entries()) {
+        renderRow(ip, data.current, data.max);
+      }
+      sortTable();
+    }
   </script>
 </body>
 
