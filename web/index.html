@@ -55,14 +55,14 @@
     <thead>
       <tr>
         <th>IP</th>
-        <th>Download (Mbps)</th>
-        <th>Upload (Mbps)</th>
-        <th>Selected TZ Time</th>
+        <th>Download</th>
+        <th>Upload</th>
+        <th>Time</th>
         <th>Timezone</th>
-        <th>Max Download (Mbps)</th>
-        <th>Max Down Time (Selected TZ)</th>
-        <th>Max Upload (Mbps)</th>
-        <th>Max Up Time (Selected TZ)</th>
+        <th>Max Download</th>
+        <th>Max Down Time</th>
+        <th>Max Upload</th>
+        <th>Max Up Time</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -134,26 +134,23 @@
         hour12: true,
       };
 
-      // 🕒 Format times based on selected timezone
-      const selectedTZTime = dateLocal.toLocaleString("en-US", {
-        ...opts,
-        timeZone: currentTZ,
-      });
+      const selectedTZTime = dateLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
+      const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
+      const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
 
-      const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", {
-        ...opts,
-        timeZone: currentTZ,
-      });
+      // 📏 Helper: format Mbps or Kbps automatically
+      const formatSpeed = (mbps) => {
+        if (mbps < 1) {
+          return `${(mbps * 1000).toFixed(2)} Kbps`;
+        }
+        return `${mbps.toFixed(3)} Mbps`;
+      };
 
-      const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", {
-        ...opts,
-        timeZone: currentTZ,
-      });
-
-      const down = curr.mbps_down.toFixed(3);
-      const up = curr.mbps_up.toFixed(3);
-      const maxDown = max.mbps_down.toFixed(3);
-      const maxUp = max.mbps_up.toFixed(3);
+      // 💡 Add formatted values
+      const down = formatSpeed(curr.mbps_down);
+      const up = formatSpeed(curr.mbps_up);
+      const maxDown = formatSpeed(max.mbps_down);
+      const maxUp = formatSpeed(max.mbps_up);
 
       const rowHTML = `
         <td>${ip}</td>
@@ -167,7 +164,7 @@
         <td>${maxUpTimeStr}</td>
       `;
 
-      const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
+      const existingRow = document.querySelector('tr[data-ip="' + ip + '"]');
       if (existingRow) {
         existingRow.innerHTML = rowHTML;
       } else {
