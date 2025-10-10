@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, str::FromStr, sync::Arc};
 
 use axum::{
     Router,
@@ -6,6 +6,7 @@ use axum::{
     response::{Html, Sse, sse::Event},
     routing::get,
 };
+use axum_server::{Handle, tls_rustls::RustlsConfig};
 use futures::{Stream, StreamExt};
 use ipc_broker::client::ClientHandle;
 use tokio::{
@@ -44,18 +45,49 @@ pub async fn spawn_webserver(mut shutdown_rx: watch::Receiver<bool>) -> JoinHand
             .route("/events", get(sse_handler))
             .with_state(state);
 
-        // Start server
-        log::info!("SSE Push Server running at http://0.0.0.0:5247");
-        axum::serve(
-            tokio::net::TcpListener::bind("0.0.0.0:5247").await.unwrap(),
-            app,
-        )
-        .with_graceful_shutdown(async move {
-            let _ = shutdown_rx.changed().await;
-            log::info!("Oneshot: shutdown signal received!");
-        })
-        .await
-        .unwrap();
+        // TLS: load cert & key (PEM files)
+        // Put your cert/key at "web/tls/cert.pem" and "web/tls/key.pem" (or change paths)
+        let bind_addr = "0.0.0.0:5247";
+        match RustlsConfig::from_pem_file("web/tls/cert.pem", "web/tls/key.pem").await {
+            Ok(rustls_config) => {
+                // Start HTTPS server with graceful shutdown
+                log::info!("SSE Push Server running at https://{bind_addr}");
+                let addr = SocketAddr::from_str(bind_addr).unwrap();
+
+                // Create a handle for the server
+                let handle = Handle::new();
+                let handle_clone = handle.clone();
+
+                // Spawn a task to wait for the shutdown_rx signal
+                tokio::task::spawn({
+                    let mut shutdown_rx = shutdown_rx.clone();
+                    async move {
+                        // Wait for shutdown signal from somewhere in your app
+                        let _ = shutdown_rx.changed().await;
+                        log::info!("Oneshot: shutdown signal received!");
+                        handle_clone.shutdown();
+                    }
+                });
+
+                let _ = axum_server::bind_rustls(addr, rustls_config)
+                    .handle(handle)
+                    .serve(app.into_make_service())
+                    .await;
+            }
+            Err(e) => {
+                log::error!("Failed to load TLS cert/key: {}", e);
+                // Start HTTP server
+                let listen_addr = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
+                log::info!("SSE Push Server running at http://{bind_addr}");
+                axum::serve(listen_addr, app)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                        log::info!("Oneshot: shutdown signal received!");
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
     })
 }
 
