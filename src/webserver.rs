@@ -1,5 +1,6 @@
 use std::{convert::Infallible, net::SocketAddr, str::FromStr, sync::Arc};
 
+use anyhow::Result;
 use axum::{
     Router,
     extract::State,
@@ -67,12 +68,12 @@ async fn spawn_https(
         .await;
 }
 
-pub async fn spawn_webserver(shutdown_rx: watch::Receiver<bool>) -> JoinHandle<()> {
+pub async fn spawn_webserver(shutdown_rx: watch::Receiver<bool>) -> Result<JoinHandle<()>> {
     // Create broadcast channel (sender for server, receivers for each client)
-    tokio::spawn(async move {
+    let client = ClientHandle::connect().await?;
+    let fut = async move {
         let (tx, _rx) = broadcast::channel(100);
 
-        let client = ClientHandle::connect().await.unwrap();
         let inner_send = tx.clone();
         client
             .subscribe_async("application.lan.speed", "speedInfo", move |value| {
@@ -103,7 +104,8 @@ pub async fn spawn_webserver(shutdown_rx: watch::Receiver<bool>) -> JoinHandle<(
                 spawn_http(bind_addr, app, shutdown_rx).await;
             }
         }
-    })
+    };
+    Ok(tokio::spawn(fut))
 }
 
 async fn sse_handler(
