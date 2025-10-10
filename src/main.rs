@@ -23,9 +23,13 @@ use tokio::task::{self, JoinHandle};
 use crate::helpers::{
     detect_local_subnet, find_active_device, ip_in_subnet, is_reserved_ip, network_address,
 };
+use crate::webserver::WebServerBuilder;
 
+pub const BIND_ADDR: &str = "0.0.0.0:5247";
 const SNAPLEN_SPEED_MONITOR: i32 = 128;
 const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
+const TLS_CERT: &str = "web/tls/cert.pem";
+const TLS_KEY: &str = "web/tls/key.pem";
 
 #[derive(Default)]
 struct Stats {
@@ -320,7 +324,14 @@ async fn main() -> Result<()> {
     let packet_listener_handle = listen_packets(tx, shutdown.clone()).await?;
 
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
-    let webserver_handle = webserver::spawn_webserver(shut_webserver_rx).await?;
+    let webserver_handle = WebServerBuilder::new()
+        .bind_addr(BIND_ADDR)
+        .cert_paths(TLS_CERT, TLS_KEY)
+        .shutdown(shut_webserver_rx)
+        .build()
+        .await?
+        .spawn()
+        .await?;
 
     log::info!("Sniffer started. Press Ctrl+C to stop.");
 
