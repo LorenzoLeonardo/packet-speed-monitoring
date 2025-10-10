@@ -320,7 +320,7 @@ async fn main() -> Result<()> {
     let packet_listener_handle = listen_packets(tx, shutdown.clone()).await?;
 
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
-    let webserver_handle = webserver::spawn_webserver(shut_webserver_rx).await;
+    let webserver_handle = webserver::spawn_webserver(shut_webserver_rx).await?;
 
     log::info!("Sniffer started. Press Ctrl+C to stop.");
 
