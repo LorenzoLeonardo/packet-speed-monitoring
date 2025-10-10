@@ -4,7 +4,8 @@ mod webserver;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::net::Ipv4Addr;
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -17,6 +18,7 @@ use etherparse::Ipv4HeaderSlice;
 use ipc_broker::client::ClientHandle;
 use pcap::Capture;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{self, JoinHandle};
 
@@ -26,7 +28,7 @@ use crate::helpers::{
 use crate::webserver::WebServerBuilder;
 
 pub const BIND_ADDR: &str = "0.0.0.0:5247";
-const SNAPLEN_SPEED_MONITOR: i32 = 128;
+const SNAPLEN_SPEED_MONITOR: i32 = 1024;
 const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
 const TLS_CERT: &str = "web/tls/cert.pem";
 const TLS_KEY: &str = "web/tls/key.pem";
@@ -40,6 +42,7 @@ struct Stats {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SpeedInfo {
     ip: String,
+    hostname: String,
     mbps_down: f64,
     mbps_up: f64,
     time_local: String,
@@ -108,7 +111,7 @@ fn update_max_speed_local(map: &mut HashMap<Ipv4Addr, SpeedInfo>, data: &SpeedIn
 }
 
 impl SpeedInfo {
-    pub fn new(ip: &str, down: f64, up: f64) -> Self {
+    pub fn new(ip: &str, hostname: &str, down: f64, up: f64) -> Self {
         let timestamp = Utc::now();
         let local_time = Local::now();
 
@@ -127,6 +130,7 @@ impl SpeedInfo {
 
         Self {
             ip: ip.to_string(),
+            hostname: hostname.to_string(),
             mbps_down: down,
             mbps_up: up,
             time_local: local_time_str,
@@ -136,13 +140,57 @@ impl SpeedInfo {
     }
 }
 
+/// Asynchronous, cached reverse DNS lookup
+async fn get_or_resolve_hostname(
+    ip: Ipv4Addr,
+    cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+) -> String {
+    // Quick read lock first — avoid re-resolving
+    {
+        let cache_guard = cache.lock().await;
+        if let Some(name) = cache_guard.get(&ip) {
+            return name.clone();
+        }
+    }
+
+    // Do reverse lookup in blocking thread
+    let resolved = tokio::task::spawn_blocking(move || reverse_lookup(&ip))
+        .await
+        .unwrap_or_else(|_| Err(io::Error::other("join error")));
+
+    let hostname = match resolved {
+        Ok(name) => {
+            log::debug!("Resolved {ip} -> {name}");
+            name
+        }
+        Err(_) => {
+            log::warn!("No reverse DNS for {ip}");
+            ip.to_string()
+        }
+    };
+
+    // Cache result
+    let mut cache_guard = cache.lock().await;
+    cache_guard.insert(ip, hostname.clone());
+
+    hostname
+}
+
+/// Blocking reverse DNS
+fn reverse_lookup(ip: &Ipv4Addr) -> io::Result<String> {
+    use dns_lookup::getnameinfo;
+    let sa = SocketAddr::new(IpAddr::V4(*ip), 0);
+    let host = getnameinfo(&sa, 0)?;
+    Ok(host.0)
+}
+
 async fn listen_packets(
     tx: UnboundedSender<Vec<BroadcastData>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<JoinHandle<()>> {
     let device = find_active_device().context("No active device found")?;
     log::info!(
-        "Sniffing on device: {} decscription: {:?}",
+        "Sniffing on device: {} description: {:?}",
         device.name,
         device.desc
     );
@@ -167,6 +215,7 @@ async fn listen_packets(
         let mut last = Instant::now();
         let mut stats = HashMap::<Ipv4Addr, Stats>::new();
         let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
+        let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
 
         let delay: u64 = std::env::var("PACKET_SPEED_POLL_DELAY_MS")
             .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
@@ -202,8 +251,9 @@ async fn listen_packets(
                 Err(e) => log::error!("{e}"),
             }
 
-            if last.elapsed() >= Duration::from_millis(delay) {
-                let elapsed_secs = last.elapsed().as_secs_f64(); // exact elapsed time
+            let elapsed = last.elapsed(); // measure once
+            if elapsed >= Duration::from_millis(delay) {
+                let elapsed_secs = elapsed.as_secs_f64(); // exact elapsed time
                 log::debug!("--- Traffic Report ---");
                 // Create a vector to hold all data for this broadcast tick
                 let mut batch: Vec<BroadcastData> = Vec::new();
@@ -213,8 +263,27 @@ async fn listen_packets(
                     log::debug!(
                         "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
                     );
+                    //let hostname_cache = hostname_cache.clone();
+                    // Try to get hostname from cache first
+                    let hostname = {
+                        let cache_guard = hostname_cache.blocking_lock();
+                        cache_guard
+                            .get(ip)
+                            .cloned()
+                            .unwrap_or_else(|| ip.to_string())
+                    };
+                    // Spawn background task to resolve if not cached
+                    if hostname == ip.to_string() {
+                        let hostname_cache = hostname_cache.clone();
+                        let ip_inner = *ip;
+                        tokio::spawn(async move {
+                            let _ = get_or_resolve_hostname(ip_inner, hostname_cache).await;
+                            // Cache is updated asynchronously
+                        });
+                    }
 
-                    let current = SpeedInfo::new(ip.to_string().as_str(), down_mbps, up_mbps);
+                    // Now you can safely create SpeedInfo
+                    let current = SpeedInfo::new(&ip.to_string(), &hostname, down_mbps, up_mbps);
 
                     // update max and create broadcast packet
                     update_max_speed_local(&mut max_speeds, &current);
