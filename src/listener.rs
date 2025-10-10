@@ -13,13 +13,25 @@ use pcap::Capture;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::task::JoinHandle;
 
 use crate::helpers::{
     detect_local_subnet, find_active_device, ip_in_subnet, is_reserved_ip, network_address,
 };
 use crate::publisher::BroadcastData;
 use crate::{PACKET_SPEED_POLL_DELAY_MS, SNAPLEN_SPEED_MONITOR};
+
+// Main entry
+pub async fn listen_packets(
+    broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
+    shutdown: Arc<AtomicBool>,
+) -> anyhow::Result<tokio::task::JoinHandle<()>> {
+    let device = find_device()?;
+    let (subnet, mask) = detect_subnet();
+
+    Ok(tokio::task::spawn_blocking(move || {
+        run_capture_loop(device, subnet, mask, broadcaster_tx, shutdown)
+    }))
+}
 
 #[derive(Default)]
 struct Stats {
@@ -122,6 +134,177 @@ impl SpeedInfo {
     }
 }
 
+/// Find the active device
+fn find_device() -> anyhow::Result<pcap::Device> {
+    let device = find_active_device().context("No active device found")?;
+    log::info!(
+        "Sniffing on device: {} description: {:?}",
+        device.name,
+        device.desc
+    );
+    Ok(device)
+}
+
+/// Detect local subnet
+fn detect_subnet() -> (Ipv4Addr, Ipv4Addr) {
+    detect_local_subnet()
+        .map(|(ip, mask)| (network_address(ip, mask), mask))
+        .unwrap_or_else(|| {
+            log::warn!("Could not detect local subnet, sending all IPs");
+            (Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 0))
+        })
+}
+
+/// Run the blocking packet capture loop
+fn run_capture_loop(
+    device: pcap::Device,
+    subnet: Ipv4Addr,
+    mask: Ipv4Addr,
+    broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
+    shutdown: Arc<AtomicBool>,
+) {
+    let mut cap = Capture::from_device(device)
+        .unwrap()
+        .promisc(true)
+        .snaplen(SNAPLEN_SPEED_MONITOR)
+        .timeout(500)
+        .immediate_mode(true)
+        .open()
+        .unwrap();
+
+    let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
+    let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
+    let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
+    let delay = get_poll_delay();
+    let mut last = Instant::now();
+
+    loop {
+        if shutdown.load(Ordering::Relaxed) {
+            log::info!("shutdown requested: exiting pcap loop");
+            break;
+        }
+
+        if let Err(e) = process_next_packet(&mut cap, &subnet, &mask, &mut stats) {
+            log::debug!("Packet processing error: {:?}", e);
+        }
+
+        if last.elapsed() >= Duration::from_millis(delay) {
+            broadcast_stats(
+                &mut stats,
+                &mut max_speeds,
+                &hostname_cache,
+                &broadcaster_tx,
+                last.elapsed().as_secs_f64(),
+            );
+            last = Instant::now();
+        }
+    }
+
+    log::info!("[listen_packets] pcap thread exiting cleanly");
+}
+
+/// Get polling delay from environment
+fn get_poll_delay() -> u64 {
+    std::env::var("PACKET_SPEED_POLL_DELAY_MS")
+        .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
+        .parse()
+        .unwrap_or(PACKET_SPEED_POLL_DELAY_MS)
+}
+
+/// Process a single packet
+fn process_next_packet(
+    cap: &mut Capture<pcap::Active>,
+    subnet: &Ipv4Addr,
+    mask: &Ipv4Addr,
+    stats: &mut HashMap<Ipv4Addr, Stats>,
+) -> Result<(), pcap::Error> {
+    match cap.next_packet() {
+        Ok(packet) => {
+            if packet.data.len() > 14
+                && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
+            {
+                update_stats(
+                    ip.source_addr(),
+                    ip.destination_addr(),
+                    packet.header.len as usize,
+                    stats,
+                    subnet,
+                    mask,
+                );
+            }
+            Ok(())
+        }
+        Err(pcap::Error::TimeoutExpired) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Update upload/download statistics
+fn update_stats(
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    size: usize,
+    stats: &mut HashMap<Ipv4Addr, Stats>,
+    subnet: &Ipv4Addr,
+    mask: &Ipv4Addr,
+) {
+    if ip_in_subnet(src, *subnet, *mask) && !is_reserved_ip(src, *subnet, *mask) {
+        stats.entry(src).or_default().upload_bytes += size;
+    }
+    if ip_in_subnet(dst, *subnet, *mask) && !is_reserved_ip(dst, *subnet, *mask) {
+        stats.entry(dst).or_default().download_bytes += size;
+    }
+}
+
+/// Broadcast current stats
+fn broadcast_stats(
+    stats: &mut HashMap<Ipv4Addr, Stats>,
+    max_speeds: &mut HashMap<Ipv4Addr, SpeedInfo>,
+    hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+    broadcaster_tx: &UnboundedSender<Vec<BroadcastData>>,
+    elapsed_secs: f64,
+) {
+    let mut batch: Vec<BroadcastData> = Vec::new();
+
+    for (ip, s) in stats.iter_mut() {
+        let up_mbps = (s.upload_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
+        let down_mbps = (s.download_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
+
+        let hostname = {
+            let cache_guard = hostname_cache.blocking_lock();
+            cache_guard
+                .get(ip)
+                .cloned()
+                .unwrap_or_else(|| ip.to_string())
+        };
+
+        if hostname == ip.to_string() {
+            let hostname_cache = hostname_cache.clone();
+            let ip_inner = *ip;
+            tokio::spawn(async move {
+                let _ = get_or_resolve_hostname(ip_inner, hostname_cache).await;
+            });
+        }
+
+        let current = SpeedInfo::new(&ip.to_string(), &hostname, down_mbps, up_mbps);
+        update_max_speed_local(max_speeds, &current);
+        let max = max_speeds
+            .get(ip)
+            .cloned()
+            .unwrap_or_else(|| current.clone());
+        batch.push(BroadcastData::new(current, max));
+
+        s.upload_bytes = 0;
+        s.download_bytes = 0;
+    }
+
+    if !batch.is_empty() {
+        if let Err(e) = broadcaster_tx.send(batch) {
+            log::warn!("{e}");
+        }
+    }
+}
+
 /// Asynchronous, cached reverse DNS lookup
 async fn get_or_resolve_hostname(
     ip: Ipv4Addr,
@@ -164,133 +347,4 @@ fn reverse_lookup(ip: &Ipv4Addr) -> io::Result<String> {
     let sa = SocketAddr::new(IpAddr::V4(*ip), 0);
     let host = getnameinfo(&sa, 0)?;
     Ok(host.0)
-}
-
-pub async fn listen_packets(
-    broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
-    shutdown: Arc<AtomicBool>,
-) -> Result<JoinHandle<()>> {
-    let device = find_active_device().context("No active device found")?;
-    log::info!(
-        "Sniffing on device: {} description: {:?}",
-        device.name,
-        device.desc
-    );
-    let mut cap = Capture::from_device(device)?
-        .promisc(true)
-        .snaplen(SNAPLEN_SPEED_MONITOR)
-        .timeout(500)
-        .immediate_mode(true)
-        .open()?;
-
-    // Detect local subnet
-    let (subnet, mask) = detect_local_subnet()
-        .map(|(ip, mask)| (network_address(ip, mask), mask))
-        .unwrap_or_else(|| {
-            log::warn!("Could not detect local subnet, sending all IPs");
-            (Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 0))
-        });
-
-    log::info!("Monitoring subnet: {subnet} Mask: {mask}");
-
-    Ok(tokio::task::spawn_blocking(move || {
-        let mut last = Instant::now();
-        let mut stats = HashMap::<Ipv4Addr, Stats>::new();
-        let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
-        let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
-
-        let delay: u64 = std::env::var("PACKET_SPEED_POLL_DELAY_MS")
-            .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
-            .parse()
-            .unwrap_or(PACKET_SPEED_POLL_DELAY_MS);
-        loop {
-            if shutdown.load(Ordering::Relaxed) {
-                log::info!("shutdown requested: exiting pcap loop");
-                break;
-            }
-
-            match cap.next_packet() {
-                Ok(packet) => {
-                    if packet.data.len() > 14
-                        && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
-                    {
-                        let src = ip.source_addr();
-                        let dst = ip.destination_addr();
-                        let size = packet.header.len as usize;
-
-                        // Filter only IPs within subnet
-                        if ip_in_subnet(src, subnet, mask) && !is_reserved_ip(src, subnet, mask) {
-                            stats.entry(src).or_default().upload_bytes += size;
-                        }
-                        if ip_in_subnet(dst, subnet, mask) && !is_reserved_ip(dst, subnet, mask) {
-                            stats.entry(dst).or_default().download_bytes += size;
-                        }
-                    }
-                }
-                Err(pcap::Error::TimeoutExpired) => {
-                    log::debug!("next_packet(): TimeoutExpired");
-                }
-                Err(e) => log::error!("{e}"),
-            }
-
-            let elapsed = last.elapsed(); // measure once
-            if elapsed >= Duration::from_millis(delay) {
-                let elapsed_secs = elapsed.as_secs_f64(); // exact elapsed time
-                log::debug!("--- Traffic Report ---");
-                // Create a vector to hold all data for this broadcast tick
-                let mut batch: Vec<BroadcastData> = Vec::new();
-                for (ip, s) in stats.iter_mut() {
-                    let up_mbps = (s.upload_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
-                    let down_mbps = (s.download_bytes as f64 * 8.0) / (1_000_000.0 * elapsed_secs);
-                    log::debug!(
-                        "{ip} => Upload: {up_mbps:.2} Mbps | Download: {down_mbps:.2} Mbps"
-                    );
-                    //let hostname_cache = hostname_cache.clone();
-                    // Try to get hostname from cache first
-                    let hostname = {
-                        let cache_guard = hostname_cache.blocking_lock();
-                        cache_guard
-                            .get(ip)
-                            .cloned()
-                            .unwrap_or_else(|| ip.to_string())
-                    };
-                    // Spawn background task to resolve if not cached
-                    if hostname == ip.to_string() {
-                        let hostname_cache = hostname_cache.clone();
-                        let ip_inner = *ip;
-                        tokio::spawn(async move {
-                            let _ = get_or_resolve_hostname(ip_inner, hostname_cache).await;
-                            // Cache is updated asynchronously
-                        });
-                    }
-
-                    // Now you can safely create SpeedInfo
-                    let current = SpeedInfo::new(&ip.to_string(), &hostname, down_mbps, up_mbps);
-
-                    // update max and create broadcast packet
-                    update_max_speed_local(&mut max_speeds, &current);
-                    let max = max_speeds
-                        .get(ip)
-                        .cloned()
-                        .unwrap_or_else(|| current.clone());
-
-                    let broad_cast = BroadcastData::new(current, max);
-                    log::trace!("{broad_cast:?}");
-                    batch.push(broad_cast);
-
-                    s.upload_bytes = 0;
-                    s.download_bytes = 0;
-                }
-                // Send the entire batch once per interval
-                if !batch.is_empty() {
-                    log::trace!("Broadcasting {} entries", batch.len());
-                    if let Err(e) = broadcaster_tx.send(batch) {
-                        log::warn!("{e}");
-                    }
-                }
-                last = Instant::now();
-            }
-        }
-        log::info!("[listen_packets] pcap thread exiting cleanly");
-    }))
 }
