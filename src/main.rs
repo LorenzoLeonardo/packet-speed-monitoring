@@ -3,6 +3,7 @@ mod listener;
 mod logger;
 mod publisher;
 mod signal;
+mod speed_info;
 mod webserver;
 
 use std::sync::{
