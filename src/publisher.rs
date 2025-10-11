@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
-use crate::listener::SpeedInfo;
+use crate::speed_info::SpeedInfo;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BroadcastData {
