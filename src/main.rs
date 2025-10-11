@@ -12,6 +12,7 @@ use std::sync::{
 };
 
 use anyhow::Result;
+use async_pcap::{AsyncCapture, Capture};
 use ipc_broker::client::ClientHandle;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -40,8 +41,18 @@ async fn main() -> Result<()> {
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
     let shutdown = Arc::new(AtomicBool::new(false));
 
+    let device = listener::find_device()?;
+    let cap = Capture::from_device(device)?
+        .promisc(true)
+        .snaplen(SNAPLEN_SPEED_MONITOR)
+        .timeout(500)
+        .immediate_mode(true)
+        .open()?;
+    // Run the capturing of the packet at the background
+    let (cap, handle) = AsyncCapture::new(cap);
+
     let publisher_handle = publisher::publish_speed_info(broadcaster_rx, shutdown.clone()).await?;
-    let packet_listener_handle = listener::listen_packets(broadcaster_tx, shutdown.clone()).await?;
+    let packet_listener_handle = listener::listen_packets(cap, broadcaster_tx).await?;
 
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
     let webserver_handle = WebServerBuilder::new()
@@ -60,6 +71,8 @@ async fn main() -> Result<()> {
     let _ = shut_webserver_tx.send(true);
     // Set to true to signal the task to exit properly
     shutdown.store(true, Ordering::Relaxed);
+    // Stop the packet capturing thread
+    handle.stop();
 
     // wait for blocking thread to end
     let (result1, result2, result3) =
