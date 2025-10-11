@@ -32,7 +32,7 @@ async fn spawn_http(bind_addr: &str, app: Router, mut shutdown_rx: watch::Receiv
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.changed().await;
-            log::info!("HTTP: shutdown signal received!");
+            log::debug!("HTTP: shutdown signal received!");
         })
         .await
         .unwrap();
@@ -56,7 +56,7 @@ async fn spawn_https(
         let mut shutdown_rx = shutdown_rx.clone();
         async move {
             let _ = shutdown_rx.changed().await;
-            log::info!("HTTPS: shutdown signal received!");
+            log::debug!("HTTPS: shutdown signal received!");
             handle_clone.shutdown();
         }
     });

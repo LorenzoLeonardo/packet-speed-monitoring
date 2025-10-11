@@ -29,7 +29,7 @@ pub async fn publish_speed_info(
     Ok(tokio::spawn(async move {
         loop {
             if shutdown.load(Ordering::Relaxed) {
-                log::info!("[publisher] shutdown requested: exiting publisher loop");
+                log::debug!("[publisher] shutdown requested: exiting publisher loop");
                 break;
             }
             match broadcaster_rx.recv().await {
@@ -45,7 +45,7 @@ pub async fn publish_speed_info(
                     }
                 }
                 None => {
-                    log::info!("[publisher] rx channel closed, exiting...");
+                    log::debug!("[publisher] rx channel closed, exiting...");
                     break;
                 }
             }
