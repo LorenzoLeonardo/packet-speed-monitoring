@@ -180,9 +180,7 @@ async fn get_or_resolve_hostname(
     }
 
     // Do reverse lookup in blocking thread
-    let resolved = tokio::task::spawn_blocking(move || reverse_lookup(&ip))
-        .await
-        .unwrap_or_else(|_| Err(io::Error::other("join error")));
+    let resolved = reverse_lookup_async(&ip).await;
 
     let hostname = match resolved {
         Ok(name) => {
@@ -202,10 +200,13 @@ async fn get_or_resolve_hostname(
     hostname
 }
 
-/// Blocking reverse DNS
-fn reverse_lookup(ip: &Ipv4Addr) -> io::Result<String> {
-    use dns_lookup::getnameinfo;
-    let sa = SocketAddr::new(IpAddr::V4(*ip), 0);
-    let host = getnameinfo(&sa, 0)?;
-    Ok(host.0)
+pub async fn reverse_lookup_async(ip: &Ipv4Addr) -> io::Result<String> {
+    let ip = *ip; // copy since Ipv4Addr is Copy
+    tokio::task::spawn_blocking(move || {
+        let sa = SocketAddr::new(IpAddr::V4(ip), 0);
+        let host = dns_lookup::getnameinfo(&sa, 0)?;
+        Ok::<_, io::Error>(host.0)
+    })
+    .await
+    .map_err(io::Error::other)?
 }
