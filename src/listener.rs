@@ -78,7 +78,7 @@ async fn run_capture_loop(
             last = Instant::now();
         }
     }
-    log::info!("[listen_packets] pcap thread exiting cleanly");
+    log::info!("[listener] pcap thread exiting cleanly");
 }
 
 /// Get polling delay from environment
