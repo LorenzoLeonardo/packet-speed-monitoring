@@ -142,7 +142,10 @@ async fn broadcast_stats(
 
         if hostname == ip.to_string() {
             let hostname_cache = hostname_cache.clone();
-            let _ = get_or_resolve_hostname(*ip, hostname_cache).await;
+            let ip_copy = *ip;
+            tokio::spawn(async move {
+                let _ = get_or_resolve_hostname(ip_copy, hostname_cache).await;
+            });
         }
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
