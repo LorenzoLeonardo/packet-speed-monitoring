@@ -2,35 +2,33 @@ use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use async_pcap::{AsyncCapture, Capture, Error, Packet};
+use async_pcap::{AsyncCapture, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::PACKET_SPEED_POLL_DELAY_MS;
 use crate::helpers::{detect_local_subnet, find_active_device, network_address};
 use crate::publisher::BroadcastData;
 use crate::speed_info::{self, SpeedInfo, Stats};
-use crate::{PACKET_SPEED_POLL_DELAY_MS, SNAPLEN_SPEED_MONITOR};
 
 // Main entry
 pub async fn listen_packets(
+    cap: AsyncCapture,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
-    shutdown: Arc<AtomicBool>,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
-    let device = find_device()?;
     let (subnet, mask) = detect_subnet();
 
     Ok(tokio::spawn(async move {
-        run_capture_loop(device, subnet, mask, broadcaster_tx, shutdown).await
+        run_capture_loop(cap, subnet, mask, broadcaster_tx).await
     }))
 }
 
 /// Find the active device
-fn find_device() -> anyhow::Result<async_pcap::Device> {
+pub fn find_device() -> anyhow::Result<async_pcap::Device> {
     let device = find_active_device().context("No active device found")?;
     log::info!(
         "Sniffing on device: {} description: {:?}",
@@ -52,21 +50,11 @@ fn detect_subnet() -> (Ipv4Addr, Ipv4Addr) {
 
 /// Run the blocking packet capture loop
 async fn run_capture_loop(
-    device: async_pcap::Device,
+    cap: AsyncCapture,
     subnet: Ipv4Addr,
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
-    shutdown: Arc<AtomicBool>,
 ) {
-    let cap = Capture::from_device(device)
-        .unwrap()
-        .promisc(true)
-        .snaplen(SNAPLEN_SPEED_MONITOR)
-        .timeout(500)
-        .immediate_mode(true)
-        .open()
-        .unwrap();
-    let (cap, handle) = AsyncCapture::new(cap);
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
     let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
@@ -74,13 +62,8 @@ async fn run_capture_loop(
     let mut last = Instant::now();
 
     while let Some(packet) = cap.next_packet().await {
-        if shutdown.load(Ordering::Relaxed) {
-            log::info!("shutdown requested: exiting pcap loop");
-            handle.stop();
-        }
-
         if let Err(e) = process_next_packet(packet, &subnet, &mask, &mut stats).await {
-            log::debug!("Packet processing error: {:?}", e);
+            log::debug!("Packet processing error: {e}");
         }
         let last_elapsed = last.elapsed();
         if last_elapsed >= Duration::from_millis(delay) {
@@ -95,7 +78,6 @@ async fn run_capture_loop(
             last = Instant::now();
         }
     }
-
     log::info!("[listen_packets] pcap thread exiting cleanly");
 }
 

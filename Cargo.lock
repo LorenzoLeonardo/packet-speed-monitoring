@@ -55,10 +55,11 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "async-pcap"
-version = "0.1.2"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f6c215d92fb72940e7de6f1379a7e6498d7e10ce28d08bd75ed762b7cc49221"
+checksum = "c7e62a443ec55552307c0540943ff1abbdbf1e8b0caa94cfd24f4bc0a9cd023a"
 dependencies = [
+ "log",
  "pcap",
  "tokio",
 ]
