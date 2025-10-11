@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use pcap::Device;
+use async_pcap::Device;
 use pnet::{datalink, ipnetwork::IpNetwork};
 
 /// Common keywords and exclusions used to identify real network interfaces
