@@ -166,6 +166,7 @@ impl WebServer {
                 log::info!("No TLS certs provided — starting HTTP server");
                 spawn_http(&bind_addr, app, shutdown_rx).await;
             }
+            log::info!("[webserver] webserver thread exiting cleanly.")
         };
 
         Ok(tokio::spawn(fut))

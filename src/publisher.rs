@@ -29,7 +29,7 @@ pub async fn publish_speed_info(
     Ok(tokio::spawn(async move {
         loop {
             if shutdown.load(Ordering::Relaxed) {
-                log::info!("shutdown requested: exiting pcap loop");
+                log::info!("[publisher] shutdown requested: exiting publisher loop");
                 break;
             }
             match broadcaster_rx.recv().await {
@@ -40,15 +40,16 @@ pub async fn publish_speed_info(
                             .publish("application.lan.speed", "speedInfo", &value)
                             .await;
                     } else {
-                        log::error!("[publish_speed_info] parse error to Value.");
+                        log::error!("[publisher] parse error to Value.");
                         break;
                     }
                 }
                 None => {
-                    log::info!("[publish_speed_info] rx channel closed, exiting...");
+                    log::info!("[publisher] rx channel closed, exiting...");
                     break;
                 }
             }
         }
+        log::info!("[publisher] publisher thread exiting cleanly")
     }))
 }
