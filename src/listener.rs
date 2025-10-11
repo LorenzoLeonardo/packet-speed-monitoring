@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use async_pcap::{AsyncCapture, Capture, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
-use pcap::Capture;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -24,13 +24,13 @@ pub async fn listen_packets(
     let device = find_device()?;
     let (subnet, mask) = detect_subnet();
 
-    Ok(tokio::task::spawn_blocking(move || {
-        run_capture_loop(device, subnet, mask, broadcaster_tx, shutdown)
+    Ok(tokio::spawn(async move {
+        run_capture_loop(device, subnet, mask, broadcaster_tx, shutdown).await
     }))
 }
 
 /// Find the active device
-fn find_device() -> anyhow::Result<pcap::Device> {
+fn find_device() -> anyhow::Result<async_pcap::Device> {
     let device = find_active_device().context("No active device found")?;
     log::info!(
         "Sniffing on device: {} description: {:?}",
@@ -51,14 +51,14 @@ fn detect_subnet() -> (Ipv4Addr, Ipv4Addr) {
 }
 
 /// Run the blocking packet capture loop
-fn run_capture_loop(
-    device: pcap::Device,
+async fn run_capture_loop(
+    device: async_pcap::Device,
     subnet: Ipv4Addr,
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
     shutdown: Arc<AtomicBool>,
 ) {
-    let mut cap = Capture::from_device(device)
+    let cap = Capture::from_device(device)
         .unwrap()
         .promisc(true)
         .snaplen(SNAPLEN_SPEED_MONITOR)
@@ -66,20 +66,20 @@ fn run_capture_loop(
         .immediate_mode(true)
         .open()
         .unwrap();
-
+    let (cap, handle) = AsyncCapture::new(cap);
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
     let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
     let delay = get_poll_delay();
     let mut last = Instant::now();
 
-    loop {
+    while let Some(packet) = cap.next_packet().await {
         if shutdown.load(Ordering::Relaxed) {
             log::info!("shutdown requested: exiting pcap loop");
-            break;
+            handle.stop();
         }
 
-        if let Err(e) = process_next_packet(&mut cap, &subnet, &mask, &mut stats) {
+        if let Err(e) = process_next_packet(packet, &subnet, &mask, &mut stats).await {
             log::debug!("Packet processing error: {:?}", e);
         }
         let last_elapsed = last.elapsed();
@@ -90,7 +90,8 @@ fn run_capture_loop(
                 &hostname_cache,
                 &broadcaster_tx,
                 last_elapsed,
-            );
+            )
+            .await;
             last = Instant::now();
         }
     }
@@ -107,13 +108,13 @@ fn get_poll_delay() -> u64 {
 }
 
 /// Process a single packet
-fn process_next_packet(
-    cap: &mut Capture<pcap::Active>,
+async fn process_next_packet(
+    packet: Result<Packet, Error>,
     subnet: &Ipv4Addr,
     mask: &Ipv4Addr,
     stats: &mut HashMap<Ipv4Addr, Stats>,
-) -> Result<(), pcap::Error> {
-    match cap.next_packet() {
+) -> Result<(), async_pcap::Error> {
+    match packet {
         Ok(packet) => {
             if packet.data.len() > 14
                 && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
@@ -129,13 +130,13 @@ fn process_next_packet(
             }
             Ok(())
         }
-        Err(pcap::Error::TimeoutExpired) => Ok(()),
+        Err(async_pcap::Error::TimeoutExpired) => Ok(()),
         Err(e) => Err(e),
     }
 }
 
 /// Broadcast current stats
-fn broadcast_stats(
+async fn broadcast_stats(
     stats: &mut HashMap<Ipv4Addr, Stats>,
     max_speeds: &mut HashMap<Ipv4Addr, SpeedInfo>,
     hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
@@ -150,7 +151,7 @@ fn broadcast_stats(
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
 
         let hostname = {
-            let cache_guard = hostname_cache.blocking_lock();
+            let cache_guard = hostname_cache.lock().await;
             cache_guard
                 .get(ip)
                 .cloned()
@@ -159,10 +160,7 @@ fn broadcast_stats(
 
         if hostname == ip.to_string() {
             let hostname_cache = hostname_cache.clone();
-            let ip_inner = *ip;
-            tokio::spawn(async move {
-                let _ = get_or_resolve_hostname(ip_inner, hostname_cache).await;
-            });
+            let _ = get_or_resolve_hostname(*ip, hostname_cache).await;
         }
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
