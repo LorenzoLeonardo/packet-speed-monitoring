@@ -12,6 +12,7 @@ use std::sync::{
 };
 
 use anyhow::Result;
+use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::{AsyncCapture, Capture};
 use ipc_broker::client::ClientHandle;
 use tokio::sync::mpsc::unbounded_channel;
@@ -50,9 +51,10 @@ async fn main() -> Result<()> {
         .open()?;
     // Run the capturing of the packet at the background
     let (cap, handle) = AsyncCapture::new(cap);
+    let dns = AsyncDnsResolver::new();
 
     let publisher_handle = publisher::publish_speed_info(broadcaster_rx, shutdown.clone()).await?;
-    let packet_listener_handle = listener::listen_packets(cap, broadcaster_tx).await?;
+    let packet_listener_handle = listener::listen_packets(cap, dns, broadcaster_tx).await?;
 
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
     let webserver_handle = WebServerBuilder::new()
