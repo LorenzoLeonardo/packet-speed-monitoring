@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::{AsyncCapture, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::Mutex;
@@ -18,12 +18,13 @@ use crate::speed_info::{self, SpeedInfo, Stats};
 // Main entry
 pub async fn listen_packets(
     cap: AsyncCapture,
+    dns: AsyncDnsResolver,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let (subnet, mask) = detect_subnet();
 
     Ok(tokio::spawn(async move {
-        run_capture_loop(cap, subnet, mask, broadcaster_tx).await
+        run_capture_loop(cap, dns, subnet, mask, broadcaster_tx).await
     }))
 }
 
@@ -51,6 +52,7 @@ fn detect_subnet() -> (Ipv4Addr, Ipv4Addr) {
 /// Run the blocking packet capture loop
 async fn run_capture_loop(
     cap: AsyncCapture,
+    dns: AsyncDnsResolver,
     subnet: Ipv4Addr,
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
@@ -68,6 +70,7 @@ async fn run_capture_loop(
         let last_elapsed = last.elapsed();
         if last_elapsed >= Duration::from_millis(delay) {
             broadcast_stats(
+                dns.clone(),
                 &mut stats,
                 &mut max_speeds,
                 &hostname_cache,
@@ -119,6 +122,7 @@ async fn process_next_packet(
 
 /// Broadcast current stats
 async fn broadcast_stats(
+    dns: AsyncDnsResolver,
     stats: &mut HashMap<Ipv4Addr, Stats>,
     max_speeds: &mut HashMap<Ipv4Addr, SpeedInfo>,
     hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
@@ -143,8 +147,9 @@ async fn broadcast_stats(
         if hostname == ip.to_string() {
             let hostname_cache = hostname_cache.clone();
             let ip_copy = *ip;
+            let dns_inner = dns.clone();
             tokio::spawn(async move {
-                let _ = get_or_resolve_hostname(ip_copy, hostname_cache).await;
+                let _ = get_or_resolve_hostname(dns_inner, ip_copy, hostname_cache).await;
             });
         }
 
@@ -168,6 +173,7 @@ async fn broadcast_stats(
 
 /// Asynchronous, cached reverse DNS lookup
 async fn get_or_resolve_hostname(
+    dns: AsyncDnsResolver,
     ip: Ipv4Addr,
     cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
 ) -> String {
@@ -180,7 +186,7 @@ async fn get_or_resolve_hostname(
     }
 
     // Do reverse lookup in blocking thread
-    let resolved = reverse_lookup_async(&ip).await;
+    let resolved = dns.reverse_lookup(ip).await;
 
     let hostname = match resolved {
         Ok(name) => {
@@ -198,15 +204,4 @@ async fn get_or_resolve_hostname(
     cache_guard.insert(ip, hostname.clone());
 
     hostname
-}
-
-pub async fn reverse_lookup_async(ip: &Ipv4Addr) -> io::Result<String> {
-    let ip = *ip; // copy since Ipv4Addr is Copy
-    tokio::task::spawn_blocking(move || {
-        let sa = SocketAddr::new(IpAddr::V4(ip), 0);
-        let host = dns_lookup::getnameinfo(&sa, 0)?;
-        Ok::<_, io::Error>(host.0)
-    })
-    .await
-    .map_err(io::Error::other)?
 }
