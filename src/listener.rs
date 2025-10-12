@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use async_dns_lookup::AsyncDnsResolver;
-use async_pcap::{AsyncCapture, Error, Packet};
+use async_pcap::{AsyncCapture, Device, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::PACKET_SPEED_POLL_DELAY_MS;
-use crate::helpers::{detect_local_subnet, find_active_device, network_address};
+use crate::helpers::{find_connected_device, network_address};
 use crate::publisher::BroadcastData;
 use crate::speed_info::{self, SpeedInfo, Stats};
 
@@ -19,34 +19,41 @@ use crate::speed_info::{self, SpeedInfo, Stats};
 pub async fn listen_packets(
     cap: AsyncCapture,
     dns: AsyncDnsResolver,
+    network_ip: Ipv4Addr,
+    mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
-    let (subnet, mask) = detect_subnet();
-
     Ok(tokio::spawn(async move {
-        run_capture_loop(cap, dns, subnet, mask, broadcaster_tx).await
+        run_capture_loop(cap, dns, network_ip, mask, broadcaster_tx).await
     }))
 }
 
 /// Find the active device
 pub fn find_device() -> anyhow::Result<async_pcap::Device> {
-    let device = find_active_device().context("No active device found")?;
-    log::info!(
-        "Sniffing on device: {} description: {:?}",
-        device.name,
-        device.desc
-    );
+    let device = find_connected_device().context("No active device found")?;
     Ok(device)
 }
 
 /// Detect local subnet
-fn detect_subnet() -> (Ipv4Addr, Ipv4Addr) {
-    detect_local_subnet()
-        .map(|(ip, mask)| (network_address(ip, mask), mask))
-        .unwrap_or_else(|| {
-            log::warn!("Could not detect local subnet, sending all IPs");
-            (Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 0))
-        })
+pub fn get_subnet(device: &Device) -> Result<(Ipv4Addr, Ipv4Addr)> {
+    for address in device.addresses.iter() {
+        if address.addr.is_ipv4()
+            && let IpAddr::V4(device_ip) = address.addr
+            && let IpAddr::V4(mask) = address.netmask.context("Subnet mask not found")?
+        {
+            let network_addr = network_address(device_ip, mask);
+            log::info!("Detected interface: {}", device.name);
+            log::info!("    ↳ Description: {:?}", device.desc);
+            log::info!("    ↳ Device Address: {device_ip}");
+            log::info!("    ↳ Network Address: {network_addr}");
+            log::info!("    ↳ Subnet Mask: {mask}");
+            return Ok((network_addr, mask));
+        }
+    }
+    Err(anyhow::anyhow!(
+        "No valid IPv4 subnet found on device {}",
+        device.name
+    ))
 }
 
 /// Run the blocking packet capture loop
