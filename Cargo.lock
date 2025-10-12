@@ -724,9 +724,9 @@ dependencies = [
 
 [[package]]
 name = "ipc-broker"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea6df933b92083ad5cfad3c87b030a6adeb8c9af7cb628dcf4b30582a72cb9c9"
+checksum = "015c1637b2c3064070ee57a584130215bd6932f29a7ea76dc3d7a97a1789b3ed"
 dependencies = [
  "async-trait",
  "chrono",
@@ -937,7 +937,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "packet-speed-monitoring"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-dns-lookup",
