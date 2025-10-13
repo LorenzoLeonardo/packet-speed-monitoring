@@ -23,6 +23,15 @@ pub const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
 const TLS_KEY: &str = "web/tls/key.pem";
 
+async fn wait_for_remote_object() -> Result<()> {
+    let client = ClientHandle::connect().await?;
+
+    log::info!("Waiting for rob . . .");
+    client.wait_for_object("rob").await?;
+    log::info!("rob has started . . .");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     logger::setup_logger();
@@ -31,11 +40,7 @@ async fn main() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     log::info!("{name} has started v{version}...");
 
-    let client = ClientHandle::connect().await?;
-
-    log::info!("Waiting for rob . . .");
-    client.wait_for_object("rob").await?;
-    log::info!("rob has started . . .");
+    wait_for_remote_object().await?;
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
