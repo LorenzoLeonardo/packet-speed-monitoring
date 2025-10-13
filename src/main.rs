@@ -73,11 +73,12 @@ async fn main() -> Result<()> {
 
     // wait here until signal is sent
     signal::wait_until_signal().await;
-    let _ = shut_webserver_tx.send(true);
-    // Set to true to signal the task to exit properly
-    shutdown.store(true, Ordering::Relaxed);
-    // Stop the packet capturing thread
+    // Stop the packet capturing thread properly
     async_capture_handle.stop();
+    // Set to true to signal the Publisher task to exit properly.
+    shutdown.store(true, Ordering::Relaxed);
+    // Stop the webserver properly
+    let _ = shut_webserver_tx.send(true);
 
     // wait for blocking thread to end
     let (result1, result2, result3) =
