@@ -12,16 +12,14 @@ use std::sync::{
 };
 
 use anyhow::Result;
-use async_dns_lookup::AsyncDnsResolver;
-use async_pcap::{AsyncCapture, Capture};
 use ipc_broker::client::ClientHandle;
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::webserver::WebServerBuilder;
+use crate::{
+    listener::PacketListenerBuilder, publisher::PublisherBuilder, webserver::WebServerBuilder,
+};
 
 pub const BIND_ADDR: &str = "0.0.0.0:5247";
-const SNAPLEN_SPEED_MONITOR: i32 = 1024;
-const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
 const TLS_CERT: &str = "web/tls/cert.pem";
 const TLS_KEY: &str = "web/tls/key.pem";
 
@@ -40,27 +38,28 @@ async fn main() -> Result<()> {
     log::info!("rob has started . . .");
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
+    let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
     let shutdown = Arc::new(AtomicBool::new(false));
 
-    let device = listener::find_device()?;
-    let (network_ip, mask) = listener::get_subnet(&device)?;
+    // Spawn the packet listener and transmit the BroadcastData into the Publisher
+    let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new()
+        .load_device()?
+        .detect_subnet()?
+        .load_dns_resolver()?
+        .transmitter_broadcast_data_channel(broadcaster_tx)
+        .spawn()
+        .await?;
 
-    let cap = Capture::from_device(device)?
-        .promisc(true)
-        .snaplen(SNAPLEN_SPEED_MONITOR)
-        .timeout(500)
-        .immediate_mode(true)
-        .open()?;
+    // Spawn the a publisher to receive the BroadcastData from the packet listener
+    let publisher_handle = PublisherBuilder::new()
+        .receiver_broadcast_data_channel(broadcaster_rx)
+        .shutdown_flag(shutdown.clone())
+        .connect_client()
+        .await?
+        .spawn()
+        .await?;
 
-    // Run the capturing of the packet at the background
-    let (cap, handle) = AsyncCapture::new(cap);
-    let dns = AsyncDnsResolver::new();
-
-    let publisher_handle = publisher::publish_speed_info(broadcaster_rx, shutdown.clone()).await?;
-    let packet_listener_handle =
-        listener::listen_packets(cap, dns, network_ip, mask, broadcaster_tx).await?;
-
-    let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
+    // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
     let webserver_handle = WebServerBuilder::new()
         .bind_addr(BIND_ADDR)
         .cert_paths(TLS_CERT, TLS_KEY)
@@ -78,7 +77,7 @@ async fn main() -> Result<()> {
     // Set to true to signal the task to exit properly
     shutdown.store(true, Ordering::Relaxed);
     // Stop the packet capturing thread
-    handle.stop();
+    async_capture_handle.stop();
 
     // wait for blocking thread to end
     let (result1, result2, result3) =

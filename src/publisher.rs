@@ -8,7 +8,8 @@ use tokio::task::JoinHandle;
 
 use crate::speed_info::SpeedInfo;
 
-#[derive(Serialize, Deserialize, Debug)]
+/// Represents the data to broadcast to subscribers
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BroadcastData {
     current: SpeedInfo,
     max: SpeedInfo,
@@ -20,36 +21,80 @@ impl BroadcastData {
     }
 }
 
-pub async fn publish_speed_info(
-    mut broadcaster_rx: UnboundedReceiver<Vec<BroadcastData>>,
-    shutdown: Arc<AtomicBool>,
-) -> Result<JoinHandle<()>, std::io::Error> {
-    let client = ClientHandle::connect().await?;
+/// Builder for configuring and running the publisher task
+pub struct PublisherBuilder {
+    receiver: Option<UnboundedReceiver<Vec<BroadcastData>>>,
+    shutdown_flag: Option<Arc<AtomicBool>>,
+    client: Option<ClientHandle>,
+}
 
-    Ok(tokio::spawn(async move {
-        loop {
-            if shutdown.load(Ordering::Relaxed) {
-                log::debug!("[publisher] shutdown requested: exiting publisher loop");
-                break;
-            }
-            match broadcaster_rx.recv().await {
-                Some(val) => {
-                    log::debug!("signal received: {val:?}");
-                    if let Ok(value) = serde_json::to_value(&val) {
-                        let _ = client
-                            .publish("application.lan.speed", "speedInfo", &value)
-                            .await;
-                    } else {
-                        log::error!("[publisher] parse error to Value.");
+impl PublisherBuilder {
+    /// Create a new publisher builder
+    pub fn new() -> Self {
+        Self {
+            receiver: None,
+            shutdown_flag: None,
+            client: None,
+        }
+    }
+
+    /// Attach an existing message receiver
+    pub fn receiver_broadcast_data_channel(
+        mut self,
+        receiver: UnboundedReceiver<Vec<BroadcastData>>,
+    ) -> Self {
+        self.receiver = Some(receiver);
+        self
+    }
+
+    /// Set the shutdown flag shared between tasks
+    pub fn shutdown_flag(mut self, shutdown_flag: Arc<AtomicBool>) -> Self {
+        self.shutdown_flag = Some(shutdown_flag);
+        self
+    }
+
+    /// Connect automatically to the IPC broker if no client is provided
+    pub async fn connect_client(mut self) -> Result<Self, std::io::Error> {
+        let client = ClientHandle::connect().await?;
+        self.client = Some(client);
+        Ok(self)
+    }
+
+    /// Start the async publisher task
+    pub async fn spawn(self) -> Result<JoinHandle<()>, std::io::Error> {
+        let mut rx = self.receiver.expect("Missing broadcaster receiver");
+        let shutdown = self.shutdown_flag.expect("Missing shutdown flag");
+        let client = self.client.expect("Missing IPC client");
+
+        Ok(tokio::spawn(async move {
+            loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    log::debug!("[publisher] shutdown requested: exiting publisher loop");
+                    break;
+                }
+
+                match rx.recv().await {
+                    Some(batch) => {
+                        log::debug!("[publisher] received batch of {} entries", batch.len());
+                        if let Ok(value) = serde_json::to_value(&batch) {
+                            if let Err(e) = client
+                                .publish("application.lan.speed", "speedInfo", &value)
+                                .await
+                            {
+                                log::error!("[publisher] publish error: {e}");
+                            }
+                        } else {
+                            log::error!("[publisher] failed to serialize broadcast data");
+                            break;
+                        }
+                    }
+                    None => {
+                        log::debug!("[publisher] channel closed, exiting...");
                         break;
                     }
                 }
-                None => {
-                    log::debug!("[publisher] rx channel closed, exiting...");
-                    break;
-                }
             }
-        }
-        log::info!("[publisher] publisher thread exiting cleanly")
-    }))
+            log::info!("[publisher] publisher thread exited cleanly");
+        }))
+    }
 }

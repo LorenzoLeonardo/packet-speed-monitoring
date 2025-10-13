@@ -5,37 +5,103 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use async_dns_lookup::AsyncDnsResolver;
-use async_pcap::{AsyncCapture, Device, Error, Packet};
+use async_pcap::{
+    AsyncCapture, AsyncCaptureHandle, Capture, ConnectionStatus, Device, Error, Packet,
+};
 use etherparse::Ipv4HeaderSlice;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{Mutex, mpsc::UnboundedSender};
 
-use crate::PACKET_SPEED_POLL_DELAY_MS;
-use crate::helpers::{find_connected_device, network_address};
+use crate::helpers::network_address;
 use crate::publisher::BroadcastData;
 use crate::speed_info::{self, SpeedInfo, Stats};
 
-// Main entry
-pub async fn listen_packets(
-    cap: AsyncCapture,
-    dns: AsyncDnsResolver,
-    network_ip: Ipv4Addr,
-    mask: Ipv4Addr,
-    broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
-) -> anyhow::Result<tokio::task::JoinHandle<()>> {
-    Ok(tokio::spawn(async move {
-        run_capture_loop(cap, dns, network_ip, mask, broadcaster_tx).await
-    }))
+const SNAPLEN_SPEED_MONITOR: i32 = 1024;
+const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
+const CAPTURE_TIMEOUT_MS: i32 = 500;
+
+/// Builder for configuring and running the packet listener
+pub struct PacketListenerBuilder {
+    device: Option<Device>,
+    subnet: Option<Ipv4Addr>,
+    mask: Option<Ipv4Addr>,
+    dns: Option<AsyncDnsResolver>,
+    broadcaster_tx: Option<UnboundedSender<Vec<BroadcastData>>>,
 }
 
-/// Find the active device
-pub fn find_device() -> anyhow::Result<async_pcap::Device> {
-    let device = find_connected_device().context("No active device found")?;
-    Ok(device)
+impl PacketListenerBuilder {
+    /// Start a new builder
+    pub fn new() -> Self {
+        Self {
+            device: None,
+            subnet: None,
+            mask: None,
+            dns: None,
+            broadcaster_tx: None,
+        }
+    }
+
+    /// Automatically find a connected device
+    pub fn load_device(mut self) -> Result<Self> {
+        let device = find_connected_device().context("No active device found")?;
+        self.device = Some(device);
+        Ok(self)
+    }
+
+    /// Detect subnet from the chosen device
+    pub fn detect_subnet(mut self) -> Result<Self> {
+        let device = self
+            .device
+            .as_ref()
+            .context("Device must be set before detecting subnet")?;
+        let (subnet, mask) = get_subnet(device)?;
+        self.subnet = Some(subnet);
+        self.mask = Some(mask);
+        Ok(self)
+    }
+
+    /// Create a default DNS resolver if not provided
+    pub fn load_dns_resolver(mut self) -> Result<Self> {
+        let resolver = AsyncDnsResolver::new();
+        self.dns = Some(resolver);
+        Ok(self)
+    }
+
+    /// Set broadcast channel
+    pub fn transmitter_broadcast_data_channel(
+        mut self,
+        tx: UnboundedSender<Vec<BroadcastData>>,
+    ) -> Self {
+        self.broadcaster_tx = Some(tx);
+        self
+    }
+
+    /// Finalize and start the listener
+    pub async fn spawn(self) -> Result<(tokio::task::JoinHandle<()>, AsyncCaptureHandle)> {
+        let device = self.device.context("Missing device")?;
+        let subnet = self.subnet.context("Missing subnet")?;
+        let mask = self.mask.context("Missing mask")?;
+        let dns = self.dns.context("Missing DNS resolver")?;
+        let broadcaster_tx = self.broadcaster_tx.context("Missing broadcaster channel")?;
+
+        let cap = Capture::from_device(device.clone())
+            .context("Failed to open capture from device")?
+            .promisc(true)
+            .snaplen(SNAPLEN_SPEED_MONITOR)
+            .timeout(CAPTURE_TIMEOUT_MS)
+            .open()
+            .context("Failed to start async capture")?;
+        let (async_capture, async_handle) = AsyncCapture::new(cap);
+        Ok((
+            tokio::spawn(async move {
+                run_capture_loop(async_capture, dns, subnet, mask, broadcaster_tx).await
+            }),
+            async_handle,
+        ))
+    }
 }
 
-/// Detect local subnet
-pub fn get_subnet(device: &Device) -> Result<(Ipv4Addr, Ipv4Addr)> {
+/// Detect local subnet for a given device
+fn get_subnet(device: &Device) -> Result<(Ipv4Addr, Ipv4Addr)> {
     for address in device.addresses.iter() {
         if address.addr.is_ipv4()
             && let IpAddr::V4(device_ip) = address.addr
@@ -56,7 +122,7 @@ pub fn get_subnet(device: &Device) -> Result<(Ipv4Addr, Ipv4Addr)> {
     ))
 }
 
-/// Run the blocking packet capture loop
+/// Core capture loop
 async fn run_capture_loop(
     cap: AsyncCapture,
     dns: AsyncDnsResolver,
@@ -88,10 +154,9 @@ async fn run_capture_loop(
             last = Instant::now();
         }
     }
-    log::info!("[listener] pcap thread exiting cleanly");
+    log::info!("[listener] capture thread exited cleanly");
 }
 
-/// Get polling delay from environment
 fn get_poll_delay() -> u64 {
     std::env::var("PACKET_SPEED_POLL_DELAY_MS")
         .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
@@ -99,7 +164,6 @@ fn get_poll_delay() -> u64 {
         .unwrap_or(PACKET_SPEED_POLL_DELAY_MS)
 }
 
-/// Process a single packet
 async fn process_next_packet(
     packet: Result<Packet, Error>,
     subnet: &Ipv4Addr,
@@ -127,7 +191,6 @@ async fn process_next_packet(
     }
 }
 
-/// Broadcast current stats
 async fn broadcast_stats(
     dns: AsyncDnsResolver,
     stats: &mut HashMap<Ipv4Addr, Stats>,
@@ -178,13 +241,11 @@ async fn broadcast_stats(
     }
 }
 
-/// Asynchronous, cached reverse DNS lookup
 async fn get_or_resolve_hostname(
     dns: AsyncDnsResolver,
     ip: Ipv4Addr,
     cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
 ) -> String {
-    // Quick read lock first — avoid re-resolving
     {
         let cache_guard = cache.lock().await;
         if let Some(name) = cache_guard.get(&ip) {
@@ -192,7 +253,6 @@ async fn get_or_resolve_hostname(
         }
     }
 
-    // Do reverse lookup in blocking thread
     let resolved = dns.reverse_lookup(ip).await;
 
     let hostname = match resolved {
@@ -206,9 +266,17 @@ async fn get_or_resolve_hostname(
         }
     };
 
-    // Cache result
     let mut cache_guard = cache.lock().await;
     cache_guard.insert(ip, hostname.clone());
-
     hostname
+}
+
+/// Detect the active pcap device
+fn find_connected_device() -> Option<Device> {
+    let devices = Device::list().ok()?;
+
+    devices
+        .iter()
+        .find(|d| d.flags.connection_status == ConnectionStatus::Connected)
+        .cloned()
 }
