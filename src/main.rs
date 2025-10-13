@@ -6,11 +6,6 @@ mod signal;
 mod speed_info;
 mod webserver;
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-
 use anyhow::Result;
 use ipc_broker::client::ClientHandle;
 use tokio::sync::mpsc::unbounded_channel;
@@ -44,7 +39,6 @@ async fn main() -> Result<()> {
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
     let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
-    let shutdown = Arc::new(AtomicBool::new(false));
 
     // Spawn the packet listener and transmit the BroadcastData into the Publisher
     let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new()
@@ -58,7 +52,6 @@ async fn main() -> Result<()> {
     // Spawn the a publisher to receive the BroadcastData from the packet listener
     let publisher_handle = PublisherBuilder::new()
         .receiver_broadcast_data_channel(broadcaster_rx)
-        .shutdown_flag(shutdown.clone())
         .connect_client()
         .await?
         .spawn()
@@ -78,10 +71,9 @@ async fn main() -> Result<()> {
 
     // wait here until signal is sent
     signal::wait_until_signal().await;
+
     // Stop the packet capturing thread properly
     async_capture_handle.stop();
-    // Set to true to signal the Publisher task to exit properly.
-    shutdown.store(true, Ordering::Relaxed);
     // Stop the webserver properly
     let _ = shut_webserver_tx.send(true);
 

@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use ipc_broker::client::ClientHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -24,7 +21,6 @@ impl BroadcastData {
 /// Builder for configuring and running the publisher task
 pub struct PublisherBuilder {
     receiver: Option<UnboundedReceiver<Vec<BroadcastData>>>,
-    shutdown_flag: Option<Arc<AtomicBool>>,
     client: Option<ClientHandle>,
 }
 
@@ -33,7 +29,6 @@ impl PublisherBuilder {
     pub fn new() -> Self {
         Self {
             receiver: None,
-            shutdown_flag: None,
             client: None,
         }
     }
@@ -47,12 +42,6 @@ impl PublisherBuilder {
         self
     }
 
-    /// Set the shutdown flag shared between tasks
-    pub fn shutdown_flag(mut self, shutdown_flag: Arc<AtomicBool>) -> Self {
-        self.shutdown_flag = Some(shutdown_flag);
-        self
-    }
-
     /// Connect automatically to the IPC broker if no client is provided
     pub async fn connect_client(mut self) -> Result<Self, std::io::Error> {
         let client = ClientHandle::connect().await?;
@@ -63,16 +52,10 @@ impl PublisherBuilder {
     /// Start the async publisher task
     pub async fn spawn(self) -> Result<JoinHandle<()>, std::io::Error> {
         let mut rx = self.receiver.expect("Missing broadcaster receiver");
-        let shutdown = self.shutdown_flag.expect("Missing shutdown flag");
         let client = self.client.expect("Missing IPC client");
 
         Ok(tokio::spawn(async move {
             loop {
-                if shutdown.load(Ordering::Relaxed) {
-                    log::debug!("[publisher] shutdown requested: exiting publisher loop");
-                    break;
-                }
-
                 match rx.recv().await {
                     Some(batch) => {
                         log::debug!("[publisher] received batch of {} entries", batch.len());
@@ -89,7 +72,7 @@ impl PublisherBuilder {
                         }
                     }
                     None => {
-                        log::debug!("[publisher] channel closed, exiting...");
+                        log::info!("[publisher] channel closed, exiting...");
                         break;
                     }
                 }
