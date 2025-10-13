@@ -21,16 +21,12 @@ impl BroadcastData {
 /// Builder for configuring and running the publisher task
 pub struct PublisherBuilder {
     receiver: Option<UnboundedReceiver<Vec<BroadcastData>>>,
-    client: Option<ClientHandle>,
 }
 
 impl PublisherBuilder {
     /// Create a new publisher builder
     pub fn new() -> Self {
-        Self {
-            receiver: None,
-            client: None,
-        }
+        Self { receiver: None }
     }
 
     /// Attach an existing message receiver
@@ -42,17 +38,10 @@ impl PublisherBuilder {
         self
     }
 
-    /// Connect automatically to the IPC broker if no client is provided
-    pub async fn connect_client(mut self) -> Result<Self, std::io::Error> {
-        let client = ClientHandle::connect().await?;
-        self.client = Some(client);
-        Ok(self)
-    }
-
     /// Start the async publisher task
     pub async fn spawn(self) -> Result<JoinHandle<()>, std::io::Error> {
         let mut rx = self.receiver.expect("Missing broadcaster receiver");
-        let client = self.client.expect("Missing IPC client");
+        let client = ClientHandle::connect().await?;
 
         Ok(tokio::spawn(async move {
             loop {

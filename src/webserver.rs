@@ -105,11 +105,8 @@ impl WebServerBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<WebServer> {
+    pub async fn spawn(self) -> Result<(JoinHandle<()>, WebServerStopper)> {
         let bind_addr = self.bind_addr.unwrap_or_else(|| BIND_ADDR.to_string());
-
-        // connect to client
-        let client = ClientHandle::connect().await?;
 
         let (tx, _rx) = broadcast::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -118,6 +115,8 @@ impl WebServerBuilder {
             shutdown_rx,
         };
         let inner_send = tx.clone();
+        // connect to client
+        let client = ClientHandle::connect().await?;
         client
             .subscribe_async("application.lan.speed", "speedInfo", move |value| {
                 let _ = inner_send.send(value.to_string());
@@ -134,13 +133,14 @@ impl WebServerBuilder {
             .route("/events", get(sse_handler))
             .with_state(state);
 
-        Ok(WebServer {
+        let server = WebServer {
             bind_addr,
             cert_path: self.cert_path,
             key_path: self.key_path,
             stopper,
             app,
-        })
+        };
+        Ok(server.spawn().await)
     }
 }
 

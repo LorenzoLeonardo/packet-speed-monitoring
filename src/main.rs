@@ -51,8 +51,6 @@ async fn main() -> Result<()> {
     // Spawn the a publisher to receive the BroadcastData from the packet listener
     let publisher_handle = PublisherBuilder::new()
         .receiver_broadcast_data_channel(broadcaster_rx)
-        .connect_client()
-        .await?
         .spawn()
         .await?;
 
@@ -60,10 +58,8 @@ async fn main() -> Result<()> {
     let (webserver_handle, webserver_stopper) = WebServerBuilder::new()
         .bind_addr(BIND_ADDR)
         .cert_paths(TLS_CERT, TLS_KEY)
-        .build()
-        .await?
         .spawn()
-        .await;
+        .await?;
 
     log::info!("Sniffer started. Press Ctrl+C to stop.");
 
