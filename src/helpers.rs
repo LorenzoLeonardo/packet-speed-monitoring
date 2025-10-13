@@ -1,7 +1,5 @@
 use std::net::Ipv4Addr;
 
-use async_pcap::{ConnectionStatus, Device};
-
 /// Returns true if the IP is reserved (broadcast, network, multicast, loopback, etc.)
 /// or private but **outside** the given subnet.
 pub(crate) fn is_reserved_ip(ip: Ipv4Addr, subnet: Ipv4Addr, mask: Ipv4Addr) -> bool {
@@ -37,16 +35,6 @@ pub(crate) fn ip_in_subnet(ip: Ipv4Addr, subnet: Ipv4Addr, mask: Ipv4Addr) -> bo
 /// Compute the network address from IP and mask
 pub(crate) fn network_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
     Ipv4Addr::from(u32::from(ip) & u32::from(mask))
-}
-
-/// Detect the active pcap device
-pub fn find_connected_device() -> Option<Device> {
-    let devices = Device::list().ok()?;
-
-    devices
-        .iter()
-        .find(|d| d.flags.connection_status == ConnectionStatus::Connected)
-        .cloned()
 }
 
 #[cfg(test)]
