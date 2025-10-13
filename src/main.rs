@@ -38,7 +38,6 @@ async fn main() -> Result<()> {
     wait_for_remote_object().await?;
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
-    let (shut_webserver_tx, shut_webserver_rx) = tokio::sync::watch::channel(false);
 
     // Spawn the packet listener and transmit the BroadcastData into the Publisher
     let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new()
@@ -58,14 +57,13 @@ async fn main() -> Result<()> {
         .await?;
 
     // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
-    let webserver_handle = WebServerBuilder::new()
+    let (webserver_handle, webserver_stopper) = WebServerBuilder::new()
         .bind_addr(BIND_ADDR)
         .cert_paths(TLS_CERT, TLS_KEY)
-        .shutdown(shut_webserver_rx)
         .build()
         .await?
         .spawn()
-        .await?;
+        .await;
 
     log::info!("Sniffer started. Press Ctrl+C to stop.");
 
@@ -75,7 +73,7 @@ async fn main() -> Result<()> {
     // Stop the packet capturing thread properly
     async_capture_handle.stop();
     // Stop the webserver properly
-    let _ = shut_webserver_tx.send(true);
+    webserver_stopper.stop();
 
     // wait for blocking thread to end
     let (result1, result2, result3) =
