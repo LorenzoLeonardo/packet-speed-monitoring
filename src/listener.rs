@@ -274,9 +274,30 @@ async fn get_or_resolve_hostname(
 /// Detect the active pcap device
 fn find_connected_device() -> Option<Device> {
     let devices = Device::list().ok()?;
-
-    devices
+    let device = devices
         .iter()
-        .find(|d| d.flags.connection_status == ConnectionStatus::Connected)
-        .cloned()
+        .find(|d| {
+            d.flags.connection_status == ConnectionStatus::Connected
+                && d.addresses.iter().any(|item| {
+                    if let IpAddr::V4(ipv4) = item.addr {
+                        // Only allow physical private ranges: 10.x.x.x and 192.168.x.x
+                        let octets = ipv4.octets();
+                        let is_physical_private =
+                            (octets[0] == 10) || (octets[0] == 192 && octets[1] == 168);
+
+                        is_physical_private
+                            && item.netmask.is_some()
+                            && item.broadcast_addr.is_some()
+                            && !ipv4.is_loopback()
+                            && !ipv4.is_multicast()
+                            && !ipv4.is_unspecified()
+                    } else {
+                        false
+                    }
+                })
+        })
+        .cloned();
+
+    log::info!("{device:?}");
+    device
 }
