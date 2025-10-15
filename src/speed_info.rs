@@ -1,7 +1,7 @@
 use std::collections::hash_map::Entry;
 use std::{collections::HashMap, net::Ipv4Addr};
 
-use chrono::{FixedOffset, Local, Offset, Utc};
+use chrono::{Local, Offset, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::{ip_in_subnet, is_reserved_ip};
@@ -32,9 +32,10 @@ pub struct SpeedInfo {
     hostname: String,
     mbps_down: f64,
     mbps_up: f64,
-    time_local: String,
     time_utc: String,
     timezone: String,
+    time_utc_down: Option<String>,
+    time_utc_up: Option<String>,
 }
 
 impl SpeedInfo {
@@ -50,19 +51,15 @@ impl SpeedInfo {
         let sign = if offset_seconds >= 0 { '+' } else { '-' };
         let timezone = format!("UTC{}{:02}:{:02}", sign, hours.abs(), minutes);
 
-        // Create FixedOffset and convert UTC → local
-        let fixed_offset =
-            FixedOffset::east_opt(offset_seconds).unwrap_or(FixedOffset::east_opt(0).unwrap());
-        let local_time_str = timestamp.with_timezone(&fixed_offset).to_rfc3339();
-
         Self {
             ip: ip.to_string(),
             hostname: hostname.to_string(),
             mbps_down: down,
             mbps_up: up,
-            time_local: local_time_str,
             time_utc: timestamp.to_rfc3339(),
             timezone,
+            time_utc_down: None,
+            time_utc_up: None,
         }
     }
 }
@@ -79,12 +76,11 @@ pub fn update_max_speed_local(map: &mut HashMap<Ipv4Addr, SpeedInfo>, data: &Spe
         Entry::Occupied(mut e) => {
             let max = e.get_mut();
             let mut changed = false;
-
+            let now = Utc::now();
             // Update download max independently
             if data.mbps_down > max.mbps_down {
                 max.mbps_down = data.mbps_down;
-                max.time_local = data.time_local.clone();
-                max.time_utc = data.time_utc.clone();
+                max.time_utc_down = Some(now.to_string());
                 max.timezone = data.timezone.clone();
                 changed = true;
             }
@@ -92,10 +88,7 @@ pub fn update_max_speed_local(map: &mut HashMap<Ipv4Addr, SpeedInfo>, data: &Spe
             // Update upload max independently
             if data.mbps_up > max.mbps_up {
                 max.mbps_up = data.mbps_up;
-                // Use the same timestamp fields to mark when upload max happened.
-                // If you want separate timestamps for up/down, see note below.
-                max.time_local = data.time_local.clone();
-                max.time_utc = data.time_utc.clone();
+                max.time_utc_up = Some(now.to_string());
                 max.timezone = data.timezone.clone();
                 changed = true;
             }
@@ -110,13 +103,11 @@ pub fn update_max_speed_local(map: &mut HashMap<Ipv4Addr, SpeedInfo>, data: &Spe
             }
         }
         Entry::Vacant(e) => {
-            e.insert(data.clone());
-            log::debug!(
-                "Inserted new max record for {} => down: {:.6}, up: {:.6}",
-                data.ip,
-                data.mbps_down,
-                data.mbps_up
-            );
+            let mut entry = data.clone();
+            let now = Utc::now().to_rfc3339();
+            entry.time_utc_down = Some(now.clone());
+            entry.time_utc_up = Some(now);
+            e.insert(entry);
         }
     }
 }

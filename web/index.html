@@ -42,6 +42,11 @@
       padding: 5px;
       font-size: 14px;
     }
+
+    /* Hide timezone column completely */
+    .hide-col {
+      display: none;
+    }
   </style>
 </head>
 
@@ -59,7 +64,7 @@
         <th>Download</th>
         <th>Upload</th>
         <th>Time</th>
-        <th>Timezone</th>
+        <th class="hide-col">Timezone</th>
         <th>Max Download</th>
         <th>Max Down Time</th>
         <th>Max Upload</th>
@@ -122,8 +127,10 @@
     };
 
     function renderRow(ip, curr, max) {
-      const dateLocal = new Date(curr.time_local);
-      const dateMaxLocal = new Date(max.time_local);
+      // Parse UTC times from backend
+      const dateUTC = new Date(curr.time_utc);
+      const dateMaxDownUTC = max.time_utc_down ? new Date(max.time_utc_down) : null;
+      const dateMaxUpUTC = max.time_utc_up ? new Date(max.time_utc_up) : null;
 
       const opts = {
         year: "numeric",
@@ -135,34 +142,28 @@
         hour12: true,
       };
 
-      const selectedTZTime = dateLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
-      const maxDownTimeStr = dateMaxLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
-      const maxUpTimeStr = dateMaxLocal.toLocaleString("en-US", { ...opts, timeZone: currentTZ });
+      const formatDate = (date) =>
+        date ? date.toLocaleString("en-US", { ...opts, timeZone: currentTZ }) : "—";
 
-      // 📏 Helper: format Mbps or Kbps automatically
-      const formatSpeed = (mbps) => {
-        if (mbps < 1) {
-          return `${(mbps * 1000).toFixed(2)} Kbps`;
-        }
-        return `${mbps.toFixed(3)} Mbps`;
-      };
+      const selectedTZTime = formatDate(dateUTC);
+      const maxDownTimeStr = formatDate(dateMaxDownUTC);
+      const maxUpTimeStr = formatDate(dateMaxUpUTC);
 
-      // 💡 Add formatted values
-      const down = formatSpeed(curr.mbps_down);
-      const up = formatSpeed(curr.mbps_up);
-      const maxDown = formatSpeed(max.mbps_down);
-      const maxUp = formatSpeed(max.mbps_up);
+      const formatSpeed = (mbps) => (mbps < 1
+        ? `${(mbps * 1000).toFixed(2)} Kbps`
+        : `${mbps.toFixed(3)} Mbps`
+      );
 
       const rowHTML = `
         <td>${ip}</td>
         <td>${curr.hostname}</td>
-        <td>${down}</td>
-        <td>${up}</td>
+        <td>${formatSpeed(curr.mbps_down)}</td>
+        <td>${formatSpeed(curr.mbps_up)}</td>
         <td>${selectedTZTime}</td>
-        <td>${currentTZ}</td>
-        <td>${maxDown}</td>
+        <td class="hide-col">${currentTZ}</td>
+        <td>${formatSpeed(max.mbps_down)}</td>
         <td>${maxDownTimeStr}</td>
-        <td>${maxUp}</td>
+        <td>${formatSpeed(max.mbps_up)}</td>
         <td>${maxUpTimeStr}</td>
       `;
 
