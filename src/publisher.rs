@@ -20,13 +20,17 @@ impl BroadcastData {
 
 /// Builder for configuring and running the publisher task
 pub struct PublisherBuilder {
+    client: ClientHandle,
     receiver: Option<UnboundedReceiver<Vec<BroadcastData>>>,
 }
 
 impl PublisherBuilder {
     /// Create a new publisher builder
-    pub fn new() -> Self {
-        Self { receiver: None }
+    pub fn new(client: ClientHandle) -> Self {
+        Self {
+            client,
+            receiver: None,
+        }
     }
 
     /// Attach an existing message receiver
@@ -41,7 +45,7 @@ impl PublisherBuilder {
     /// Start the async publisher task
     pub async fn spawn(self) -> Result<JoinHandle<()>, std::io::Error> {
         let mut rx = self.receiver.expect("Missing broadcaster receiver");
-        let client = ClientHandle::connect().await?;
+        let client = self.client.clone();
 
         Ok(tokio::spawn(async move {
             loop {

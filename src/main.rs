@@ -20,11 +20,9 @@ pub const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
 const TLS_KEY: &str = "web/tls/key.pem";
 
-async fn wait_for_remote_object() -> Result<()> {
-    let client = ClientHandle::connect().await?;
-
+async fn wait_for_remote_object(handle: &ClientHandle) -> Result<()> {
     log::info!("Waiting for rob . . .");
-    client.wait_for_object("rob").await?;
+    handle.wait_for_object("rob").await?;
     log::info!("rob has started . . .");
     Ok(())
 }
@@ -37,7 +35,8 @@ async fn main() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     log::info!("{name} has started v{version}...");
 
-    wait_for_remote_object().await?;
+    let client = ClientHandle::connect().await?;
+    wait_for_remote_object(&client).await?;
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
     let device = DeviceInfo::get_physical_device().context("No physical device found")?;
@@ -49,13 +48,13 @@ async fn main() -> Result<()> {
         .await?;
 
     // Spawn the a publisher to receive the BroadcastData from the packet listener
-    let publisher_handle = PublisherBuilder::new()
+    let publisher_handle = PublisherBuilder::new(client.clone())
         .receiver_broadcast_data_channel(broadcaster_rx)
         .spawn()
         .await?;
 
     // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
-    let (webserver_handle, webserver_stopper) = WebServerBuilder::new()
+    let (webserver_handle, webserver_stopper) = WebServerBuilder::new(client)
         .bind_addr(BIND_ADDR)
         .cert_paths(TLS_CERT, TLS_KEY)
         .spawn()

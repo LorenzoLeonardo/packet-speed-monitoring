@@ -83,14 +83,16 @@ pub struct WebServerBuilder {
     bind_addr: Option<String>,
     cert_path: Option<String>,
     key_path: Option<String>,
+    client: ClientHandle,
 }
 
 impl WebServerBuilder {
-    pub fn new() -> Self {
+    pub fn new(client: ClientHandle) -> Self {
         Self {
             bind_addr: None,
             cert_path: None,
             key_path: None,
+            client,
         }
     }
 
@@ -115,9 +117,8 @@ impl WebServerBuilder {
             shutdown_rx,
         };
         let inner_send = tx.clone();
-        // connect to client
-        let client = ClientHandle::connect().await?;
-        client
+
+        self.client
             .subscribe_async("application.lan.speed", "speedInfo", move |value| {
                 let _ = inner_send.send(value.to_string());
             })
