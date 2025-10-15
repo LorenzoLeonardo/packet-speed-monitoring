@@ -1,17 +1,15 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use async_dns_lookup::AsyncDnsResolver;
-use async_pcap::{
-    AsyncCapture, AsyncCaptureHandle, Capture, ConnectionStatus, Device, Error, Packet,
-};
+use async_pcap::{AsyncCapture, AsyncCaptureHandle, Capture, Device, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::{Mutex, mpsc::UnboundedSender};
 
-use crate::helpers::network_address;
+use crate::device::DeviceInfo;
 use crate::publisher::BroadcastData;
 use crate::speed_info::{self, SpeedInfo, Stats};
 
@@ -21,42 +19,19 @@ const CAPTURE_TIMEOUT_MS: i32 = 500;
 
 /// Builder for configuring and running the packet listener
 pub struct PacketListenerBuilder {
-    device: Option<Device>,
-    subnet: Option<Ipv4Addr>,
-    mask: Option<Ipv4Addr>,
+    device: DeviceInfo,
     dns: Option<AsyncDnsResolver>,
     broadcaster_tx: Option<UnboundedSender<Vec<BroadcastData>>>,
 }
 
 impl PacketListenerBuilder {
     /// Start a new builder
-    pub fn new() -> Self {
+    pub fn new(device: DeviceInfo) -> Self {
         Self {
-            device: None,
-            subnet: None,
-            mask: None,
+            device,
             dns: None,
             broadcaster_tx: None,
         }
-    }
-
-    /// Automatically find a connected device
-    pub fn load_device(mut self) -> Result<Self> {
-        let device = find_connected_device().context("No active device found")?;
-        self.device = Some(device);
-        Ok(self)
-    }
-
-    /// Detect subnet from the chosen device
-    pub fn detect_subnet(mut self) -> Result<Self> {
-        let device = self
-            .device
-            .as_ref()
-            .context("Device must be set before detecting subnet")?;
-        let (subnet, mask) = get_subnet(device)?;
-        self.subnet = Some(subnet);
-        self.mask = Some(mask);
-        Ok(self)
     }
 
     /// Create a default DNS resolver if not provided
@@ -77,13 +52,12 @@ impl PacketListenerBuilder {
 
     /// Finalize and start the listener
     pub async fn spawn(self) -> Result<(tokio::task::JoinHandle<()>, AsyncCaptureHandle)> {
-        let device = self.device.context("Missing device")?;
-        let subnet = self.subnet.context("Missing subnet")?;
-        let mask = self.mask.context("Missing mask")?;
+        let subnet = self.device.network_ip;
+        let mask = self.device.netmask;
         let dns = self.dns.context("Missing DNS resolver")?;
         let broadcaster_tx = self.broadcaster_tx.context("Missing broadcaster channel")?;
-
-        let cap = Capture::from_device(device.clone())
+        let device = Device::try_from(&self.device)?;
+        let cap = Capture::from_device(device)
             .context("Failed to open capture from device")?
             .promisc(true)
             .snaplen(SNAPLEN_SPEED_MONITOR)
@@ -98,28 +72,6 @@ impl PacketListenerBuilder {
             async_handle,
         ))
     }
-}
-
-/// Detect local subnet for a given device
-fn get_subnet(device: &Device) -> Result<(Ipv4Addr, Ipv4Addr)> {
-    for address in device.addresses.iter() {
-        if address.addr.is_ipv4()
-            && let IpAddr::V4(device_ip) = address.addr
-            && let IpAddr::V4(mask) = address.netmask.context("Subnet mask not found")?
-        {
-            let network_addr = network_address(device_ip, mask);
-            log::info!("Detected interface: {}", device.name);
-            log::info!("    ↳ Description: {:?}", device.desc);
-            log::info!("    ↳ Device Address: {device_ip}");
-            log::info!("    ↳ Network Address: {network_addr}");
-            log::info!("    ↳ Subnet Mask: {mask}");
-            return Ok((network_addr, mask));
-        }
-    }
-    Err(anyhow::anyhow!(
-        "No valid IPv4 subnet found on device {}",
-        device.name
-    ))
 }
 
 /// Core capture loop
@@ -269,35 +221,4 @@ async fn get_or_resolve_hostname(
     let mut cache_guard = cache.lock().await;
     cache_guard.insert(ip, hostname.clone());
     hostname
-}
-
-/// Detect the active pcap device
-fn find_connected_device() -> Option<Device> {
-    let devices = Device::list().ok()?;
-    let device = devices
-        .iter()
-        .find(|d| {
-            d.flags.connection_status == ConnectionStatus::Connected
-                && d.addresses.iter().any(|item| {
-                    if let IpAddr::V4(ipv4) = item.addr {
-                        // Only allow physical private ranges: 10.x.x.x and 192.168.x.x
-                        let octets = ipv4.octets();
-                        let is_physical_private =
-                            (octets[0] == 10) || (octets[0] == 192 && octets[1] == 168);
-
-                        is_physical_private
-                            && item.netmask.is_some()
-                            && item.broadcast_addr.is_some()
-                            && !ipv4.is_loopback()
-                            && !ipv4.is_multicast()
-                            && !ipv4.is_unspecified()
-                    } else {
-                        false
-                    }
-                })
-        })
-        .cloned();
-
-    log::info!("{device:?}");
-    device
 }

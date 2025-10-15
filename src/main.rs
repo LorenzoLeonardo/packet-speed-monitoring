@@ -7,12 +7,13 @@ mod signal;
 mod speed_info;
 mod webserver;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ipc_broker::client::ClientHandle;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    listener::PacketListenerBuilder, publisher::PublisherBuilder, webserver::WebServerBuilder,
+    device::DeviceInfo, listener::PacketListenerBuilder, publisher::PublisherBuilder,
+    webserver::WebServerBuilder,
 };
 
 pub const BIND_ADDR: &str = "0.0.0.0:5247";
@@ -39,11 +40,9 @@ async fn main() -> Result<()> {
     wait_for_remote_object().await?;
 
     let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
-
+    let device = DeviceInfo::get_physical_device().context("No physical device found")?;
     // Spawn the packet listener and transmit the BroadcastData into the Publisher
-    let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new()
-        .load_device()?
-        .detect_subnet()?
+    let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new(device)
         .load_dns_resolver()?
         .transmitter_broadcast_data_channel(broadcaster_tx)
         .spawn()
