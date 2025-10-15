@@ -8,17 +8,17 @@ use crate::helpers;
 
 #[derive(Serialize, Debug, Clone)]
 pub struct DeviceInfo {
-    name: String,
-    desc: String,
-    device_ip: Ipv4Addr,
-    network_ip: Ipv4Addr,
-    netmask: Ipv4Addr,
+    pub name: String,
+    pub desc: String,
+    pub device_ip: Ipv4Addr,
+    pub network_ip: Ipv4Addr,
+    pub netmask: Ipv4Addr,
 }
 
-impl TryFrom<DeviceInfo> for Device {
+impl TryFrom<&DeviceInfo> for Device {
     type Error = anyhow::Error;
 
-    fn try_from(value: DeviceInfo) -> Result<Self, Self::Error> {
+    fn try_from(value: &DeviceInfo) -> Result<Self, Self::Error> {
         let devices = Device::list().map_err(|err| anyhow::anyhow!(err))?;
 
         devices
@@ -29,10 +29,10 @@ impl TryFrom<DeviceInfo> for Device {
     }
 }
 
-impl TryFrom<Device> for DeviceInfo {
+impl TryFrom<&Device> for DeviceInfo {
     type Error = anyhow::Error;
 
-    fn try_from(device: Device) -> Result<Self, Self::Error> {
+    fn try_from(device: &Device) -> Result<Self, Self::Error> {
         for address in device.addresses.iter() {
             if address.addr.is_ipv4()
                 && let IpAddr::V4(device_ip) = address.addr
@@ -40,8 +40,8 @@ impl TryFrom<Device> for DeviceInfo {
             {
                 let network_ip = helpers::network_address(device_ip, netmask);
                 return Ok(Self {
-                    name: device.name,
-                    desc: device.desc.unwrap_or_default(),
+                    name: device.name.clone(),
+                    desc: device.desc.clone().unwrap_or_default(),
                     device_ip,
                     network_ip,
                     netmask,
@@ -57,7 +57,7 @@ impl TryFrom<Device> for DeviceInfo {
 
 impl DeviceInfo {
     pub fn get_physical_device() -> Option<DeviceInfo> {
-        Self::find_connected_devices()
+        let physical = Self::find_connected_devices()
             .iter()
             .find(|dev| {
                 let octets = dev.device_ip.octets();
@@ -69,7 +69,14 @@ impl DeviceInfo {
                     && !dev.device_ip.is_multicast()
                     && !dev.device_ip.is_unspecified()
             })
-            .cloned()
+            .cloned()?;
+        log::info!("Detected physical interface:");
+        log::info!("    ↳ Name: {:?}", physical.name);
+        log::info!("    ↳ Description: {:?}", physical.desc);
+        log::info!("    ↳ Device Address: {}", physical.device_ip);
+        log::info!("    ↳ Network Address: {}", physical.network_ip);
+        log::info!("    ↳ Subnet Mask: {}", physical.netmask);
+        Some(physical)
     }
     pub fn find_connected_devices() -> Vec<DeviceInfo> {
         // Get the list of devices, return an empty Vec if listing fails
@@ -95,7 +102,7 @@ impl DeviceInfo {
                         }
                     })
             })
-            .filter_map(|device| match DeviceInfo::try_from(device) {
+            .filter_map(|device| match DeviceInfo::try_from(&device) {
                 Ok(info) => Some(info),
                 Err(err) => {
                     log::warn!("Skipping device due to error: {err}");
@@ -103,7 +110,7 @@ impl DeviceInfo {
                 }
             })
             .collect();
-        log::info!("Filtered connected devices: {filtered:?}");
+        log::info!("Filtered connected devices: {:#?}", filtered);
         filtered
     }
 }
