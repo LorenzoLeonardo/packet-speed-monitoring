@@ -15,6 +15,7 @@
       border-collapse: collapse;
       width: 100%;
       background: #64b5f6;
+      border: 4px solid #0d47a1;
     }
 
     th,
@@ -43,6 +44,21 @@
       font-size: 14px;
     }
 
+    .divider {
+      position: relative;
+      border-right: none !important; /* avoid inner border overlap */
+    }
+
+    .divider::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: -2px; /* aligns exactly at the table border edge */
+      bottom: 0;
+      width: 4px; /* thickness of the divider */
+      background: #0d47a1; /* same color as your main border */
+    }
+
     /* Hide timezone column completely */
     .hide-col {
       display: none;
@@ -63,8 +79,8 @@
         <th>Hostname</th>
         <th>Download</th>
         <th>Upload</th>
-        <th>Time</th>
-        <th class="hide-col">Timezone</th>
+        <th class="divider">Time</th>
+        <th class="hide-col after-timezone">Timezone</th>
         <th>Max Download</th>
         <th>Max Down Time</th>
         <th>Max Upload</th>
@@ -159,8 +175,8 @@
         <td>${curr.hostname}</td>
         <td>${formatSpeed(curr.mbps_down)}</td>
         <td>${formatSpeed(curr.mbps_up)}</td>
-        <td>${selectedTZTime}</td>
-        <td class="hide-col">${currentTZ}</td>
+        <td class="divider">${selectedTZTime}</td>
+        <td class="hide-col after-timezone">${currentTZ}</td>
         <td>${formatSpeed(max.mbps_down)}</td>
         <td>${maxDownTimeStr}</td>
         <td>${formatSpeed(max.mbps_up)}</td>
