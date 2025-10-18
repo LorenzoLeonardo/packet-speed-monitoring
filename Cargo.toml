@@ -1,8 +1,9 @@
 [package]
 name = "packet-speed-monitoring"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 build = "build.rs"
+authors = ["Lorenzo Leonardo <enzotechcomputersolutions@gmail.com>"]
 
 [dependencies]
 anyhow = "1.0"
