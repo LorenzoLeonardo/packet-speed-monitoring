@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     let monitor = PacketMonitor::start(client.clone()).await?;
 
     // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
-    let (webserver_handle, webserver_stopper) = WebServerBuilder::new(client)
+    let webserver_handler = WebServerBuilder::new(client)
         .bind_addr(BIND_ADDR)
         .cert_paths(TLS_CERT, TLS_KEY)
         .spawn()
@@ -70,10 +70,10 @@ async fn main() -> Result<()> {
     // Stop the packet capturing thread properly
     monitor.stop();
     // Stop the webserver properly
-    webserver_stopper.stop();
+    webserver_handler.stop();
 
     // wait for blocking thread to end
-    let (result1, result2) = tokio::join!(monitor.handle, webserver_handle);
+    let (result1, result2) = tokio::join!(monitor.handle, webserver_handler.handle);
 
     for (i, res) in [result1, result2].into_iter().enumerate() {
         if let Err(e) = res {
