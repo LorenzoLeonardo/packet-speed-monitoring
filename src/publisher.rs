@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use ipc_broker::client::ClientHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -43,11 +44,12 @@ impl PublisherBuilder {
     }
 
     /// Start the async publisher task
-    pub async fn spawn(self) -> Result<JoinHandle<()>, std::io::Error> {
-        let mut rx = self.receiver.expect("Missing broadcaster receiver");
+    pub async fn spawn(self) -> Result<JoinHandle<()>> {
+        let mut rx = self.receiver.context("Missing broadcaster receiver")?;
         let client = self.client.clone();
 
         Ok(tokio::spawn(async move {
+            log::info!("[publisher] publisher task started.");
             loop {
                 match rx.recv().await {
                     Some(batch) => {
@@ -70,7 +72,7 @@ impl PublisherBuilder {
                     }
                 }
             }
-            log::info!("[publisher] publisher thread exited cleanly");
+            log::info!("[publisher] publisher task ended.");
         }))
     }
 }

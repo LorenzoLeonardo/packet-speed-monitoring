@@ -82,6 +82,7 @@ async fn run_capture_loop(
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
 ) {
+    log::info!("[listener] packet listener task started.");
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
     let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
@@ -106,7 +107,7 @@ async fn run_capture_loop(
             last = Instant::now();
         }
     }
-    log::info!("[listener] capture thread exited cleanly");
+    log::info!("[listener] packet listener task ended.");
 }
 
 fn get_poll_delay() -> u64 {
