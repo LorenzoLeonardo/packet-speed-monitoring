@@ -2,19 +2,16 @@ mod device;
 mod helpers;
 mod listener;
 mod logger;
+mod monitor;
 mod publisher;
 mod signal;
 mod speed_info;
 mod webserver;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ipc_broker::client::ClientHandle;
-use tokio::sync::mpsc::unbounded_channel;
 
-use crate::{
-    device::DeviceInfo, listener::PacketListenerBuilder, publisher::PublisherBuilder,
-    webserver::WebServerBuilder,
-};
+use crate::{monitor::PacketMonitor, webserver::WebServerBuilder};
 
 pub const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
@@ -27,31 +24,38 @@ async fn wait_for_remote_object(handle: &ClientHandle) -> Result<()> {
     Ok(())
 }
 
+struct LogStart;
+
+impl LogStart {
+    pub fn start() -> Self {
+        logger::setup_logger();
+
+        log::info!(
+            "{} v{} has started.",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+        Self
+    }
+}
+
+impl Drop for LogStart {
+    fn drop(&mut self) {
+        log::info!(
+            "{} v{} has ended.",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    logger::setup_logger();
-
-    let name = env!("CARGO_PKG_NAME");
-    let version = env!("CARGO_PKG_VERSION");
-    log::info!("{name} has started v{version}...");
-
+    let _log = LogStart::start();
     let client = ClientHandle::connect().await?;
     wait_for_remote_object(&client).await?;
 
-    let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
-    let device = DeviceInfo::get_physical_device().context("No physical device found")?;
-    // Spawn the packet listener and transmit the BroadcastData into the Publisher
-    let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new(device)
-        .load_dns_resolver()?
-        .transmitter_broadcast_data_channel(broadcaster_tx)
-        .spawn()
-        .await?;
-
-    // Spawn the a publisher to receive the BroadcastData from the packet listener
-    let publisher_handle = PublisherBuilder::new(client.clone())
-        .receiver_broadcast_data_channel(broadcaster_rx)
-        .spawn()
-        .await?;
+    let monitor = PacketMonitor::start(client.clone()).await?;
 
     // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
     let (webserver_handle, webserver_stopper) = WebServerBuilder::new(client)
@@ -60,25 +64,21 @@ async fn main() -> Result<()> {
         .spawn()
         .await?;
 
-    log::info!("Sniffer started. Press Ctrl+C to stop.");
-
     // wait here until signal is sent
     signal::wait_until_signal().await;
 
     // Stop the packet capturing thread properly
-    async_capture_handle.stop();
+    monitor.stop();
     // Stop the webserver properly
     webserver_stopper.stop();
 
     // wait for blocking thread to end
-    let (result1, result2, result3) =
-        tokio::join!(packet_listener_handle, publisher_handle, webserver_handle);
+    let (result1, result2) = tokio::join!(monitor.handle, webserver_handle);
 
-    for (i, res) in [result1, result2, result3].into_iter().enumerate() {
+    for (i, res) in [result1, result2].into_iter().enumerate() {
         if let Err(e) = res {
             log::error!("Task {i} failed: {e}");
         }
     }
-    log::info!("[packet-speed-monitoring] Ended.");
     Ok(())
 }

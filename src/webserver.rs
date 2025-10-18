@@ -39,6 +39,7 @@ impl WebServerStopper {
 
 // Spawn HTTP Server
 async fn spawn_http(bind_addr: &str, app: Router, mut stopper: WebServerStopper) {
+    log::info!("[webserver] HTTP Webserver started.");
     let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
     log::info!("SSE Push Server running using HTTP at http://{bind_addr}");
     axum::serve(listener, app)
@@ -48,6 +49,7 @@ async fn spawn_http(bind_addr: &str, app: Router, mut stopper: WebServerStopper)
         })
         .await
         .unwrap();
+    log::info!("[webserver] HTTP Webserver ended.");
 }
 
 // Spawn HTTPS Server
@@ -57,6 +59,7 @@ async fn spawn_https(
     stopper: WebServerStopper,
     rustls_config: RustlsConfig,
 ) {
+    log::info!("[webserver] HTTPS Webserver started.");
     let addr = SocketAddr::from_str(bind_addr).unwrap();
     log::info!("SSE Push Server running using HTTPS at https://{bind_addr}");
 
@@ -77,6 +80,7 @@ async fn spawn_https(
         .handle(handle)
         .serve(app.into_make_service())
         .await;
+    log::info!("[webserver] HTTPS Webserver ended.");
 }
 
 pub struct WebServerBuilder {
@@ -176,7 +180,6 @@ impl WebServer {
                 log::info!("No TLS certs provided — starting HTTP server");
                 spawn_http(&bind_addr, app, stopper.clone()).await;
             }
-            log::info!("[webserver] webserver thread exiting cleanly.")
         };
 
         (tokio::spawn(fut), self.stopper)
