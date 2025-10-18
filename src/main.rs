@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
     let client = ClientHandle::connect().await?;
     wait_for_remote_object(&client).await?;
 
-    let monitor = PacketMonitor::start(client.clone()).await?;
+    let packet_monitor_handler = PacketMonitor::start(client.clone()).await?;
 
     // Spawn a webserver to host to push the received BroadcastData from the Publisher into the browser
     let webserver_handler = WebServerBuilder::new(client)
@@ -68,12 +68,12 @@ async fn main() -> Result<()> {
     signal::wait_until_signal().await;
 
     // Stop the packet capturing thread properly
-    monitor.stop();
+    packet_monitor_handler.stop();
     // Stop the webserver properly
     webserver_handler.stop();
 
     // wait for blocking thread to end
-    let (result1, result2) = tokio::join!(monitor.handle, webserver_handler.handle);
+    let (result1, result2) = tokio::join!(packet_monitor_handler.handle, webserver_handler.handle);
 
     for (i, res) in [result1, result2].into_iter().enumerate() {
         if let Err(e) = res {
