@@ -111,7 +111,7 @@ impl WebServerBuilder {
         self
     }
 
-    pub async fn spawn(self) -> Result<(JoinHandle<()>, WebServerStopper)> {
+    pub async fn spawn(self) -> Result<WebServerHandler> {
         let bind_addr = self.bind_addr.unwrap_or_else(|| BIND_ADDR.to_string());
 
         let (tx, _rx) = broadcast::channel(100);
@@ -158,7 +158,7 @@ pub struct WebServer {
 }
 
 impl WebServer {
-    pub async fn spawn(self) -> (JoinHandle<()>, WebServerStopper) {
+    pub async fn spawn(self) -> WebServerHandler {
         let bind_addr = self.bind_addr.clone();
         let app = self.app.clone();
         let stopper = self.stopper.clone();
@@ -181,8 +181,21 @@ impl WebServer {
                 spawn_http(&bind_addr, app, stopper.clone()).await;
             }
         };
+        WebServerHandler {
+            handle: tokio::spawn(fut),
+            web_stopper: self.stopper,
+        }
+    }
+}
 
-        (tokio::spawn(fut), self.stopper)
+pub struct WebServerHandler {
+    pub handle: JoinHandle<()>,
+    web_stopper: WebServerStopper,
+}
+
+impl WebServerHandler {
+    pub fn stop(&self) {
+        self.web_stopper.clone().stop();
     }
 }
 
