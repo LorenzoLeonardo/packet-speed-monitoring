@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use ipc_broker::client::ClientHandle;
+use ipc_broker::client::IPCClient;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
@@ -21,13 +21,13 @@ impl BroadcastData {
 
 /// Builder for configuring and running the publisher task
 pub struct PublisherBuilder {
-    client: ClientHandle,
+    client: IPCClient,
     receiver: Option<UnboundedReceiver<Vec<BroadcastData>>>,
 }
 
 impl PublisherBuilder {
     /// Create a new publisher builder
-    pub fn new(client: ClientHandle) -> Self {
+    pub fn new(client: IPCClient) -> Self {
         Self {
             client,
             receiver: None,

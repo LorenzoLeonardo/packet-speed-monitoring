@@ -9,7 +9,7 @@ mod speed_info;
 mod webserver;
 
 use anyhow::Result;
-use ipc_broker::client::ClientHandle;
+use ipc_broker::client::IPCClient;
 
 use crate::{monitor::PacketMonitor, webserver::WebServerBuilder};
 
@@ -17,7 +17,7 @@ pub const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
 const TLS_KEY: &str = "web/tls/key.pem";
 
-async fn wait_for_remote_object(handle: &ClientHandle) -> Result<()> {
+async fn wait_for_remote_object(handle: &IPCClient) -> Result<()> {
     log::info!("Waiting for rob . . .");
     handle.wait_for_object("rob").await?;
     log::info!("rob has started . . .");
@@ -52,7 +52,7 @@ impl Drop for LogStart {
 #[tokio::main]
 async fn main() -> Result<()> {
     let _log = LogStart::start();
-    let client = ClientHandle::connect().await?;
+    let client = IPCClient::connect().await?;
     wait_for_remote_object(&client).await?;
 
     let packet_monitor_handler = PacketMonitor::start(client.clone()).await?;

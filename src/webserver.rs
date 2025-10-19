@@ -9,7 +9,7 @@ use axum::{
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use futures::{Stream, StreamExt};
-use ipc_broker::client::ClientHandle;
+use ipc_broker::client::IPCClient;
 use tokio::{
     fs,
     sync::{broadcast, watch},
@@ -87,11 +87,11 @@ pub struct WebServerBuilder {
     bind_addr: Option<String>,
     cert_path: Option<String>,
     key_path: Option<String>,
-    client: ClientHandle,
+    client: IPCClient,
 }
 
 impl WebServerBuilder {
-    pub fn new(client: ClientHandle) -> Self {
+    pub fn new(client: IPCClient) -> Self {
         Self {
             bind_addr: None,
             cert_path: None,
