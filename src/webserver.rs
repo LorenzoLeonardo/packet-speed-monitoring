@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, stream};
 use ipc_broker::client::IPCClient;
 use serde_json::json;
 use tokio::{
@@ -226,10 +226,27 @@ async fn sse_handler(
     // Each new client gets its own receiver
     let rx = state.tx.subscribe();
     let mut stopper = state.stopper.clone();
-    // Convert broadcast receiver into a Stream of SSE events
-    let stream = BroadcastStream::new(rx)
+
+    // Query current status once
+    let (status_tx, status_rx) = oneshot::channel();
+    let _ = state
+        .control
+        .send(ControlMessage::GetStatus(status_tx))
+        .await;
+    let current_status = status_rx.await.unwrap_or(false);
+
+    // Create an immediate, one-time "status" event
+    let initial_event = json!({
+        "type": "status",
+        "running": current_status
+    })
+    .to_string();
+
+    // Stream that first sends current status, then continues with broadcast updates
+    let initial_stream = stream::once(async move { Ok(Event::default().data(initial_event)) });
+
+    let broadcast_stream = BroadcastStream::new(rx)
         .take_until(async move {
-            // wait until shutdown flag flips
             let _ = stopper.shutdown_rx.changed().await;
             log::info!("[webserver] Server-sent event has stopped.");
         })
@@ -240,7 +257,10 @@ async fn sse_handler(
             }
         });
 
-    Sse::new(stream)
+    // Combine the two streams
+    let combined_stream = initial_stream.chain(broadcast_stream);
+
+    Sse::new(combined_stream)
 }
 
 // HTML dashboard
