@@ -1,4 +1,8 @@
-pub async fn wait_until_signal() {
+use std::sync::Arc;
+
+use tokio::sync::Notify;
+
+pub async fn wait_until_signal(manual_trigger: Arc<Notify>) {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
@@ -13,15 +17,23 @@ pub async fn wait_until_signal() {
             _ = int.recv() => {
                 log::info!("Received SIGINT (Ctrl+C).");
             }
+            _ = manual_trigger.notified() => {
+                log::info!("Received internal shutdown signal (manual trigger).");
+            }
         }
     }
 
     #[cfg(windows)]
     {
         // On Windows, only Ctrl+C is supported directly
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                log::info!("Received Ctrl+C (Windows)");
+            }
+            _ = manual_trigger.notified() => {
+                log::info!("Received internal shutdown signal (manual trigger).");
+            }
+        }
         log::info!("Received Ctrl+C (Windows)");
     }
 }

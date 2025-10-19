@@ -1,28 +1,38 @@
 use std::{convert::Infallible, net::SocketAddr, str::FromStr, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
-    Router,
+    Json, Router,
     extract::State,
     response::{Html, Sse, sse::Event},
-    routing::get,
+    routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use futures::{Stream, StreamExt};
 use ipc_broker::client::IPCClient;
+use serde_json::json;
 use tokio::{
     fs,
-    sync::{broadcast, watch},
+    sync::{broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::BIND_ADDR;
 
+#[derive(Debug)]
+pub enum ControlMessage {
+    Start,
+    Stop,
+    GetStatus(oneshot::Sender<bool>),
+    Quit,
+}
+
 #[derive(Clone)]
 struct AppState {
     tx: broadcast::Sender<String>,
     stopper: WebServerStopper,
+    control: mpsc::Sender<ControlMessage>, // new controller channel
 }
 
 #[derive(Clone)]
@@ -88,6 +98,7 @@ pub struct WebServerBuilder {
     cert_path: Option<String>,
     key_path: Option<String>,
     client: IPCClient,
+    control: Option<mpsc::Sender<ControlMessage>>,
 }
 
 impl WebServerBuilder {
@@ -97,6 +108,7 @@ impl WebServerBuilder {
             cert_path: None,
             key_path: None,
             client,
+            control: None,
         }
     }
 
@@ -111,9 +123,14 @@ impl WebServerBuilder {
         self
     }
 
+    pub fn add_control(mut self, control: mpsc::Sender<ControlMessage>) -> Self {
+        self.control = Some(control);
+        self
+    }
+
     pub async fn spawn(self) -> Result<WebServerHandler> {
         let bind_addr = self.bind_addr.unwrap_or_else(|| BIND_ADDR.to_string());
-
+        let control = self.control.context("No control set")?;
         let (tx, _rx) = broadcast::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let stopper = WebServerStopper {
@@ -131,11 +148,15 @@ impl WebServerBuilder {
         let state = Arc::new(AppState {
             tx,
             stopper: stopper.clone(),
+            control,
         });
 
         let app = Router::new()
             .route("/", get(index_handler))
             .route("/events", get(sse_handler))
+            .route("/start", post(start_handler))
+            .route("/stop", post(stop_handler))
+            .route("/status", get(status_handler))
             .with_state(state);
 
         let server = WebServer {
@@ -228,4 +249,21 @@ async fn index_handler() -> Html<String> {
         .await
         .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string());
     Html(html)
+}
+
+async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let _ = state.control.send(ControlMessage::Start).await;
+    Json(json!({ "ok": true, "running": true }))
+}
+
+async fn stop_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let _ = state.control.send(ControlMessage::Stop).await;
+    Json(json!({ "ok": true, "running": false }))
+}
+
+async fn status_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let (tx, rx) = oneshot::channel();
+    let _ = state.control.send(ControlMessage::GetStatus(tx)).await;
+    let running = rx.await.unwrap_or(false);
+    Json(json!({ "running": running }))
 }
