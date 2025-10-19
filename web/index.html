@@ -122,22 +122,25 @@
 
     evtSource.onmessage = (event) => {
       try {
-        const batch = JSON.parse(event.data);
+        const msg = JSON.parse(event.data);
 
-        // ✅ Expecting `batch` to be an array of { current, max }
-        if (!Array.isArray(batch)) {
-          console.warn("Unexpected data format:", batch);
+        // 🔹 Handle backend status broadcasts
+        if (msg.type === "status") {
+          toggleButtons(msg.running);
+          return; // stop processing further
+        }
+
+        // 🔹 Handle LAN speed updates (must be an array)
+        if (!Array.isArray(msg)) {
+          console.warn("Unexpected data format:", msg);
           return;
         }
 
-        for (const data of batch) {
+        for (const data of msg) {
           const curr = data.current;
           const max = data.max;
           const ip = curr.ip;
-
-          // Store data for rerendering later
           rowDataMap.set(ip, data);
-
           renderRow(ip, curr, max);
         }
 

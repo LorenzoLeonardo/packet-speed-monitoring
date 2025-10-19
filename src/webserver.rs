@@ -253,11 +253,13 @@ async fn index_handler() -> Html<String> {
 
 async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let _ = state.control.send(ControlMessage::Start).await;
+    broadcast_status(&state.tx, true).await; // <-- broadcast to all clients
     Json(json!({ "ok": true, "running": true }))
 }
 
 async fn stop_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let _ = state.control.send(ControlMessage::Stop).await;
+    broadcast_status(&state.tx, false).await; // <-- broadcast to all clients
     Json(json!({ "ok": true, "running": false }))
 }
 
@@ -266,4 +268,12 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::
     let _ = state.control.send(ControlMessage::GetStatus(tx)).await;
     let running = rx.await.unwrap_or(false);
     Json(json!({ "running": running }))
+}
+
+async fn broadcast_status(tx: &broadcast::Sender<String>, running: bool) {
+    let payload = json!({
+        "type": "status",
+        "running": running
+    });
+    let _ = tx.send(payload.to_string());
 }
