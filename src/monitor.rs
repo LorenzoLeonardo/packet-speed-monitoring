@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_pcap::AsyncCaptureHandle;
-use ipc_broker::client::ClientHandle;
+use ipc_broker::client::IPCClient;
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{device::DeviceInfo, listener::PacketListenerBuilder, publisher::PublisherBuilder};
@@ -11,7 +11,7 @@ pub struct PacketMonitor {
 }
 
 impl PacketMonitor {
-    pub async fn start(client: ClientHandle) -> Result<Self> {
+    pub async fn start(client: IPCClient) -> Result<Self> {
         let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
         let device = DeviceInfo::get_physical_device().context("No physical device found")?;
         // Spawn the packet listener and transmit the BroadcastData into the Publisher
