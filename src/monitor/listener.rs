@@ -9,9 +9,9 @@ use async_pcap::{AsyncCapture, AsyncCaptureHandle, Capture, Device, Error, Packe
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::{Mutex, mpsc::UnboundedSender};
 
-use crate::device::DeviceInfo;
+use crate::monitor::device::DeviceInfo;
 use crate::monitor::publisher::BroadcastData;
-use crate::speed_info::{self, SpeedInfo, Stats};
+use crate::monitor::speed_info::{self, SpeedInfo, Stats};
 
 const SNAPLEN_SPEED_MONITOR: i32 = 1024;
 const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;

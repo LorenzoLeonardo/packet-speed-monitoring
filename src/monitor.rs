@@ -1,5 +1,7 @@
+mod device;
 mod listener;
 mod publisher;
+mod speed_info;
 
 use anyhow::{Context, Result};
 use async_pcap::AsyncCaptureHandle;
@@ -7,7 +9,7 @@ use ipc_broker::client::IPCClient;
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{
-    device::DeviceInfo,
+    monitor::device::DeviceInfo,
     monitor::{listener::PacketListenerBuilder, publisher::PublisherBuilder},
 };
 
