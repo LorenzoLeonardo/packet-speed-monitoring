@@ -56,3 +56,28 @@ pub fn setup_logger() {
         log::error!("Logger initialization failed: {e}");
     }
 }
+
+pub struct Log;
+
+impl Log {
+    pub fn init() -> Self {
+        setup_logger();
+
+        log::info!(
+            "{} v{} has started.",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+        Self
+    }
+}
+
+impl Drop for Log {
+    fn drop(&mut self) {
+        log::info!(
+            "{} v{} has ended.",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+}

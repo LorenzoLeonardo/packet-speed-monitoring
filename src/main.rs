@@ -11,7 +11,7 @@ use anyhow::Result;
 use ipc_broker::client::IPCClient;
 use tokio::sync::Notify;
 
-use crate::manager::SystemManager;
+use crate::{logger::Log, manager::SystemManager};
 
 const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
@@ -24,34 +24,9 @@ async fn wait_for_remote_object(handle: &IPCClient) -> Result<()> {
     Ok(())
 }
 
-struct LogStart;
-
-impl LogStart {
-    pub fn start() -> Self {
-        logger::setup_logger();
-
-        log::info!(
-            "{} v{} has started.",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        );
-        Self
-    }
-}
-
-impl Drop for LogStart {
-    fn drop(&mut self) {
-        log::info!(
-            "{} v{} has ended.",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        );
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _log = LogStart::start();
+    let _log = Log::init();
     let client = IPCClient::connect().await?;
     // Trigger via process or triggered outside by the OS to stop the process properly.
     let manual_trigger = Arc::new(Notify::new());
