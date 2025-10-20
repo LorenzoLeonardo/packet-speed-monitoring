@@ -24,15 +24,48 @@ pub enum ControlMessage {
     Quit,
 }
 
-pub async fn control_manager(
+pub struct ControlHandler {
+    handle: JoinHandle<()>,
+    tx: Sender<ControlMessage>,
+}
+
+impl ControlHandler {
+    pub async fn start(&self) {
+        if let Err(e) = self.tx.send(ControlMessage::Start).await {
+            log::error!("{e}");
+        }
+    }
+    pub async fn stop(self) {
+        if let Err(e) = self.tx.send(ControlMessage::Quit).await {
+            log::error!("{e}");
+        }
+        if let Err(e) = self.handle.await {
+            log::error!("{e}");
+        }
+    }
+}
+
+pub struct SystemManager {
     client: IPCClient,
     signal_handle: Arc<Notify>,
-) -> (JoinHandle<()>, Sender<ControlMessage>) {
-    let (control_tx, mut control_rx) = mpsc::channel::<ControlMessage>(8);
-    // --- Spawn control background task ---
-    let control_tx_outter = control_tx.clone();
-    (
-        tokio::spawn(async move {
+}
+
+impl SystemManager {
+    pub fn new(client: IPCClient, signal_handle: Arc<Notify>) -> Self {
+        Self {
+            client,
+            signal_handle,
+        }
+    }
+
+    pub async fn spawn(&self) -> ControlHandler {
+        let (control_tx, mut control_rx) = mpsc::channel::<ControlMessage>(8);
+        // --- Spawn control background task ---
+        let client = self.client.clone();
+        let signal_handle = self.signal_handle.clone();
+        let control_tx_outter = control_tx.clone();
+
+        let cntrl_fut = async move {
             let mut packet_monitor: Option<PacketMonitor> = None;
             let mut web_handler: Option<WebServerHandler> = None;
             // controller channel for start/stop
@@ -67,6 +100,7 @@ pub async fn control_manager(
                                         }
                                     }
                                 }
+                                log::info!("Started PacketMonitor");
                             }
                             Err(e) => {
                                 log::error!("Failed to start packet monitor: {e}");
@@ -99,7 +133,10 @@ pub async fn control_manager(
                     }
                 }
             }
-        }),
-        control_tx_outter,
-    )
+        };
+        ControlHandler {
+            handle: tokio::spawn(cntrl_fut),
+            tx: control_tx_outter,
+        }
+    }
 }

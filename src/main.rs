@@ -13,7 +13,7 @@ use anyhow::Result;
 use ipc_broker::client::IPCClient;
 use tokio::sync::Notify;
 
-use crate::manager::ControlMessage;
+use crate::manager::SystemManager;
 
 const BIND_ADDR: &str = "0.0.0.0:5247";
 const TLS_CERT: &str = "web/tls/cert.pem";
@@ -60,13 +60,13 @@ async fn main() -> Result<()> {
 
     wait_for_remote_object(&client).await?;
 
-    let (cntrl_handle, cancel) =
-        manager::control_manager(client, Arc::clone(&manual_trigger)).await;
+    let handle = SystemManager::new(client, Arc::clone(&manual_trigger))
+        .spawn()
+        .await;
 
-    let _ = cancel.send(ControlMessage::Start).await;
+    handle.start().await;
     // wait here until signal is sent
     signal::wait_until_signal(manual_trigger).await;
-    let _ = cancel.send(ControlMessage::Quit).await;
-    let _ = cntrl_handle.await;
+    handle.stop().await;
     Ok(())
 }
