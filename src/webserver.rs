@@ -12,14 +12,13 @@ use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     extract::State,
-    response::{Html, Sse, sse::Event},
+    response::{Redirect, Sse, sse::Event},
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use ipc_broker::client::IPCClient;
 use serde_json::json;
 use tokio::{
-    fs,
     sync::{
         broadcast::{self, error::RecvError},
         mpsc, oneshot, watch,
@@ -27,6 +26,8 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
+use tower::{ServiceExt, service_fn};
+use tower_http::services::ServeDir;
 
 use crate::{BIND_ADDR, manager::ControlMessage};
 
@@ -154,14 +155,15 @@ impl WebServerBuilder {
             sender_channel,
             client_count: Arc::new(AtomicUsize::new(0)),
         });
-
+        let serve_dir = ServeDir::new("web");
         let app = Router::new()
-            .route("/", get(index_handler))
+            .route("/", get(|| async { Redirect::to("/index.html") }))
             .route("/events", get(sse_handler))
             .route("/start", post(start_handler))
             .route("/stop", post(stop_handler))
             .route("/status", get(status_handler))
-            .with_state(state);
+            .with_state(state)
+            .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)));
 
         let server = WebServer {
             bind_addr,
@@ -302,14 +304,6 @@ async fn sse_handler(
     // Convert the mpsc receiver into an SSE-compatible stream
     let stream = ReceiverStream::new(rx_sse);
     Sse::new(stream)
-}
-
-// HTML dashboard
-async fn index_handler() -> Html<String> {
-    let html = fs::read_to_string("web/index.html")
-        .await
-        .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string());
-    Html(html)
 }
 
 async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
