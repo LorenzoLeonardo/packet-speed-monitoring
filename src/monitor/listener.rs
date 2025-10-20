@@ -10,7 +10,7 @@ use etherparse::Ipv4HeaderSlice;
 use tokio::sync::{Mutex, mpsc::UnboundedSender};
 
 use crate::device::DeviceInfo;
-use crate::publisher::BroadcastData;
+use crate::monitor::publisher::BroadcastData;
 use crate::speed_info::{self, SpeedInfo, Stats};
 
 const SNAPLEN_SPEED_MONITOR: i32 = 1024;

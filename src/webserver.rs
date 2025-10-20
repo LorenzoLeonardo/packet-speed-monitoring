@@ -18,15 +18,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::BIND_ADDR;
-
-#[derive(Debug)]
-pub enum ControlMessage {
-    Start,
-    Stop,
-    GetStatus(oneshot::Sender<bool>),
-    Quit,
-}
+use crate::{BIND_ADDR, manager::ControlMessage};
 
 #[derive(Clone)]
 struct AppState {
