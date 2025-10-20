@@ -1,4 +1,4 @@
-mod device;
+pub mod device;
 mod listener;
 mod publisher;
 mod speed_info;
@@ -16,18 +16,20 @@ use crate::{
 pub struct PacketMonitor {
     async_capture_handle: AsyncCaptureHandle,
     pub handle: JoinHandle<()>,
+    pub device_info: DeviceInfo,
 }
 
 impl PacketMonitor {
     pub async fn start(client: IPCClient) -> Result<Self> {
         let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
-        let device = DeviceInfo::get_physical_device().context("No physical device found")?;
+        let device_info = DeviceInfo::get_physical_device().context("No physical device found")?;
         // Spawn the packet listener and transmit the BroadcastData into the Publisher
-        let (packet_listener_handle, async_capture_handle) = PacketListenerBuilder::new(device)
-            .load_dns_resolver()?
-            .transmitter_broadcast_data_channel(broadcaster_tx)
-            .spawn()
-            .await?;
+        let (packet_listener_handle, async_capture_handle) =
+            PacketListenerBuilder::new(device_info.clone())
+                .load_dns_resolver()?
+                .transmitter_broadcast_data_channel(broadcaster_tx)
+                .spawn()
+                .await?;
 
         // Spawn the a publisher to receive the BroadcastData from the packet listener
         let publisher_handle = PublisherBuilder::new(client.clone())
@@ -43,6 +45,7 @@ impl PacketMonitor {
         Ok(Self {
             async_capture_handle,
             handle,
+            device_info,
         })
     }
 

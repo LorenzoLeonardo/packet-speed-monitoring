@@ -11,13 +11,18 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{BIND_ADDR, TLS_CERT, TLS_KEY, monitor::PacketMonitor, webserver::WebServerBuilder};
+use crate::{
+    BIND_ADDR, TLS_CERT, TLS_KEY,
+    monitor::{PacketMonitor, device::DeviceInfo},
+    webserver::WebServerBuilder,
+};
 
 #[derive(Debug)]
 pub enum ControlMessage {
     Start,
     Stop,
     GetStatus(oneshot::Sender<bool>),
+    GetDeviceInfo(oneshot::Sender<DeviceInfo>),
     Quit,
 }
 
@@ -102,6 +107,11 @@ impl SystemManager {
                     ControlMessage::GetStatus(reply_tx) => {
                         let running = packet_monitor.is_some();
                         let _ = reply_tx.send(running);
+                    }
+                    ControlMessage::GetDeviceInfo(reply_tx) => {
+                        if let Some(info) = &packet_monitor {
+                            let _ = reply_tx.send(info.device_info.clone());
+                        }
                     }
                     ControlMessage::Quit => {
                         log::info!("[manager] SystemManager is exiting...");
