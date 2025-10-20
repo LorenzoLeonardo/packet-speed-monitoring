@@ -8,15 +8,17 @@ use axum::{
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
-use futures::{Stream, StreamExt, stream};
 use ipc_broker::client::IPCClient;
 use serde_json::json;
 use tokio::{
     fs,
-    sync::{broadcast, mpsc, oneshot, watch},
+    sync::{
+        broadcast::{self, error::RecvError},
+        mpsc, oneshot, watch,
+    },
     task::JoinHandle,
 };
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::{BIND_ADDR, manager::ControlMessage};
 
@@ -215,8 +217,9 @@ impl WebServerHandler {
 async fn sse_handler(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    log::info!("[webserver] A client browser has connected.");
     // Each new client gets its own receiver
-    let rx = state.tx.subscribe();
+    let mut rx = state.tx.subscribe();
     let mut stopper = state.stopper.clone();
 
     // Query current status once
@@ -227,32 +230,58 @@ async fn sse_handler(
         .await;
     let current_status = status_rx.await.unwrap_or(false);
 
-    // Create an immediate, one-time "status" event
+    // Serialize the initial "status" message
     let initial_event = json!({
         "type": "status",
         "running": current_status
     })
     .to_string();
 
-    // Stream that first sends current status, then continues with broadcast updates
-    let initial_stream = stream::once(async move { Ok(Event::default().data(initial_event)) });
+    // Create an mpsc channel for pushing SSE events manually
+    let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
 
-    let broadcast_stream = BroadcastStream::new(rx)
-        .take_until(async move {
-            let _ = stopper.shutdown_rx.changed().await;
-            log::info!("[webserver] Server-sent event has stopped.");
-        })
-        .filter_map(|msg| async move {
-            match msg {
-                Ok(text) => Some(Ok(Event::default().data(text))),
-                Err(_) => None,
+    // Spawn a background task that forwards both the initial event and broadcast updates
+    tokio::spawn(async move {
+        // Send the initial event
+        if let Err(e) = tx.send(Ok(Event::default().data(initial_event))).await {
+            log::error!("{e}");
+            return;
+        }
+
+        loop {
+            tokio::select! {
+                // Handle shutdown signal
+                _ = stopper.shutdown_rx.changed() => {
+                    log::info!("[webserver] SSE stopped by shutdown signal.");
+                    break;
+                }
+
+                // Receive from broadcast channel
+                msg = rx.recv() => {
+                    match msg {
+                        Ok(text) => {
+                            if let Err(e) = tx.send(Ok(Event::default().data(text))).await {
+                                log::warn!("[webserver] A client browser has disconnected: {e}");
+                                break; // client disconnected
+                            }
+                        }
+                        Err(RecvError::Lagged(n)) => {
+                            log::warn!("Lagged: {n}");
+                            continue
+                        },
+                        Err(RecvError::Closed) => {
+                            log::error!("[webserver] channel has closed. Bail out!");
+                            break
+                        },
+                    }
+                }
             }
-        });
+        }
+    });
 
-    // Combine the two streams
-    let combined_stream = initial_stream.chain(broadcast_stream);
-
-    Sse::new(combined_stream)
+    // Convert the mpsc receiver into an SSE-compatible stream
+    let stream = ReceiverStream::new(rx_sse);
+    Sse::new(stream)
 }
 
 // HTML dashboard
