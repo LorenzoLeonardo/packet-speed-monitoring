@@ -17,6 +17,15 @@ evtSource.onmessage = (event) => {
             return;
         }
 
+        if (msg.type === "device_info") {
+            document.getElementById("device-name").textContent = msg.device_name;
+            document.getElementById("device-desc").textContent = msg.description;
+            document.getElementById("device-ip").textContent = msg.device_ip;
+            document.getElementById("network-ip").textContent = msg.network_ip;
+            document.getElementById("subnet-mask").textContent = msg.subnet_mask;
+            return;
+        }
+
         if (!Array.isArray(msg)) {
             console.warn("Unexpected data format:", msg);
             return;

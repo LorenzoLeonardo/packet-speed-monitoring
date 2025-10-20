@@ -10,29 +10,64 @@
 <body>
   <h1>Enzo Tech Computer Solutions - Packet Speed Monitor</h1>
 
-  <label for="tz-select"><b>Select Timezone:</b></label>
-  <select id="tz-select"></select>
+  <!-- Controls Section -->
+  <section class="controls-section">
+    <h2>Select Timezone</h2>
+    <select id="tz-select"></select>
+    <button id="start-btn" class="btn btn-start">Start Listener</button>
+    <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
+  </section>
 
-  <button id="start-btn" class="btn btn-start">Start Listener</button>
-  <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
+  <!-- New Device Info Table -->
+  <section class="device-info-section">
+    <h2>Device Information</h2>
+    <table id="device-table">
+      <tbody>
+        <tr>
+          <th>Device Name</th>
+          <td id="device-name">—</td>
+        </tr>
+        <tr>
+          <th>Description</th>
+          <td id="device-desc">—</td>
+        </tr>
+        <tr>
+          <th>Device IP</th>
+          <td id="device-ip">—</td>
+        </tr>
+        <tr>
+          <th>Network IP</th>
+          <td id="network-ip">—</td>
+        </tr>
+        <tr>
+          <th>Subnet Mask</th>
+          <td id="subnet-mask">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
 
-  <table id="speed-table">
-    <thead>
-      <tr>
-        <th>IP</th>
-        <th>Hostname</th>
-        <th>Download</th>
-        <th>Upload</th>
-        <th class="divider">Time</th>
-        <th class="hide-col after-timezone">Timezone</th>
-        <th>Max Download</th>
-        <th>Max Down Time</th>
-        <th>Max Upload</th>
-        <th>Max Up Time</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <!-- Speed Section -->
+  <section class="speed-section">
+    <table id="speed-table">
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>Hostname</th>
+          <th>Download</th>
+          <th>Upload</th>
+          <th class="divider">Time</th>
+          <th class="hide-col after-timezone">Timezone</th>
+          <th>Max Download</th>
+          <th>Max Down Time</th>
+          <th>Max Upload</th>
+          <th>Max Up Time</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
   <script type="module" src="js/main.js"></script>
 </body>
 

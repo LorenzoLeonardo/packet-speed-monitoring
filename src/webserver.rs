@@ -1,6 +1,6 @@
 use std::{
     convert::Infallible,
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr},
     str::FromStr,
     sync::{
         Arc,
@@ -29,7 +29,7 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tower::{ServiceExt, service_fn};
 use tower_http::services::ServeDir;
 
-use crate::{BIND_ADDR, manager::ControlMessage};
+use crate::{BIND_ADDR, manager::ControlMessage, monitor::device::DeviceInfo};
 
 #[derive(Clone)]
 struct AppState {
@@ -253,6 +253,29 @@ async fn sse_handler(
     })
     .to_string();
 
+    let (devinfo_tx, devinfo_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetDeviceInfo(devinfo_tx))
+        .await;
+    let dev_info = devinfo_rx.await.unwrap_or(DeviceInfo {
+        name: String::from(""),
+        desc: String::from(""),
+        device_ip: Ipv4Addr::new(0, 0, 0, 0),
+        network_ip: Ipv4Addr::new(0, 0, 0, 0),
+        netmask: Ipv4Addr::new(0, 0, 0, 0),
+    });
+
+    let device_info_event = json!({
+        "type": "device_info",
+        "device_name": dev_info.name,
+        "description": dev_info.desc,
+        "device_ip": dev_info.device_ip.to_string(),
+        "network_ip": dev_info.network_ip.to_string(),
+        "subnet_mask": dev_info.netmask.to_string()
+    })
+    .to_string();
+
     // Create an mpsc channel for pushing SSE events manually
     let (tx, rx_sse) = mpsc::channel::<Result<Event, Infallible>>(16);
     let state_clone = state.clone(); // <-- clone to decrement later
@@ -262,6 +285,15 @@ async fn sse_handler(
         // Send the initial event
         if let Err(e) = tx.send(Ok(Event::default().data(initial_event))).await {
             log::error!("{e}");
+            return;
+        }
+
+        if tx
+            .send(Ok(Event::default().data(device_info_event)))
+            .await
+            .is_err()
+        {
+            log::warn!("Client disconnected before device info sent.");
             return;
         }
 
