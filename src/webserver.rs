@@ -1,4 +1,12 @@
-use std::{convert::Infallible, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -27,6 +35,7 @@ struct AppState {
     tx: broadcast::Sender<String>,
     stopper: WebServerStopper,
     sender_channel: mpsc::Sender<ControlMessage>, // new controller channel
+    client_count: Arc<AtomicUsize>,
 }
 
 #[derive(Clone)]
@@ -143,6 +152,7 @@ impl WebServerBuilder {
             tx,
             stopper: stopper.clone(),
             sender_channel,
+            client_count: Arc::new(AtomicUsize::new(0)),
         });
 
         let app = Router::new()
@@ -217,7 +227,11 @@ impl WebServerHandler {
 async fn sse_handler(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    log::info!("[webserver] A client browser has connected.");
+    let client_id = state.client_count.fetch_add(1, Ordering::SeqCst) + 1;
+    log::info!(
+        "[webserver] A client browser has connected. Total clients: {}",
+        client_id
+    );
     // Each new client gets its own receiver
     let mut rx = state.tx.subscribe();
     let mut stopper = state.stopper.clone();
@@ -239,6 +253,7 @@ async fn sse_handler(
 
     // Create an mpsc channel for pushing SSE events manually
     let (tx, rx_sse) = mpsc::channel::<Result<Event, Infallible>>(16);
+    let state_clone = state.clone(); // <-- clone to decrement later
 
     // Spawn a background task that forwards both the initial event and broadcast updates
     tokio::spawn(async move {
@@ -277,6 +292,11 @@ async fn sse_handler(
                 }
             }
         }
+        let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
+        log::info!(
+            "[webserver] Client disconnected. Remaining clients: {}",
+            remaining
+        );
     });
 
     // Convert the mpsc receiver into an SSE-compatible stream
