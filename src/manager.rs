@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Result;
 use ipc_broker::client::IPCClient;
 use tokio::{
     sync::{
@@ -10,11 +11,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{
-    BIND_ADDR, TLS_CERT, TLS_KEY,
-    monitor::PacketMonitor,
-    webserver::{WebServerBuilder, WebServerHandler},
-};
+use crate::{BIND_ADDR, TLS_CERT, TLS_KEY, monitor::PacketMonitor, webserver::WebServerBuilder};
 
 #[derive(Debug)]
 pub enum ControlMessage {
@@ -58,54 +55,40 @@ impl SystemManager {
         }
     }
 
-    pub async fn spawn(&self) -> ControlHandler {
+    pub async fn spawn(&self) -> Result<ControlHandler> {
         let (control_tx, mut control_rx) = mpsc::channel::<ControlMessage>(8);
         // --- Spawn control background task ---
         let client = self.client.clone();
         let signal_handle = self.signal_handle.clone();
         let control_tx_outter = control_tx.clone();
 
+        let web_handler = WebServerBuilder::new(client.clone())
+            .bind_addr(BIND_ADDR)
+            .cert_paths(TLS_CERT, TLS_KEY)
+            .add_control(control_tx.clone())
+            .spawn()
+            .await?;
+
         let cntrl_fut = async move {
             let mut packet_monitor: Option<PacketMonitor> = None;
-            let mut web_handler: Option<WebServerHandler> = None;
-            // controller channel for start/stop
-
+            log::info!("[manager] SystemManager has started.");
             while let Some(msg) = control_rx.recv().await {
                 let client = client.clone();
                 match msg {
                     ControlMessage::Start => {
                         if packet_monitor.is_some() {
-                            log::warn!("Already running, ignoring Start.");
+                            log::warn!("[manager] Already running, ignoring Start.");
                             continue;
                         }
 
                         match PacketMonitor::start(client.clone()).await {
                             Ok(pm_handler) => {
                                 packet_monitor = Some(pm_handler);
-                                if web_handler.is_none() {
-                                    match WebServerBuilder::new(client)
-                                        .bind_addr(BIND_ADDR)
-                                        .cert_paths(TLS_CERT, TLS_KEY)
-                                        .add_control(control_tx.clone())
-                                        .spawn()
-                                        .await
-                                    {
-                                        Ok(ws_handler) => {
-                                            web_handler = Some(ws_handler);
-                                        }
-                                        Err(e) => {
-                                            log::error!("Failed to start webserver: {e}");
-                                            signal_handle.notify_one();
-                                            break;
-                                        }
-                                    }
-                                }
-                                log::info!("Started PacketMonitor");
+                                log::info!("[manager] Started PacketMonitor");
                             }
                             Err(e) => {
-                                log::error!("Failed to start packet monitor: {e}");
+                                log::error!("[manager] Failed to start packet monitor: {e}");
                                 signal_handle.notify_one();
-                                break;
                             }
                         }
                     }
@@ -113,30 +96,30 @@ impl SystemManager {
                         if let Some(pm) = packet_monitor.take() {
                             pm.stop();
                             let _ = pm.handle.await;
+                            log::info!("[manager] Stopped PacketMonitor");
                         }
-                        log::info!("Stopped PacketMonitor");
                     }
                     ControlMessage::GetStatus(reply_tx) => {
-                        let running = packet_monitor.is_some() && web_handler.is_some();
+                        let running = packet_monitor.is_some();
                         let _ = reply_tx.send(running);
                     }
                     ControlMessage::Quit => {
+                        log::info!("[manager] SystemManager is exiting...");
                         if let Some(pm) = packet_monitor.take() {
                             pm.stop();
                             let _ = pm.handle.await;
                         }
-                        if let Some(ws) = web_handler.take() {
-                            ws.stop();
-                            let _ = ws.handle.await;
-                        }
+                        web_handler.stop();
+                        let _ = web_handler.handle.await;
                         break;
                     }
                 }
             }
+            log::info!("[manager] SystemManager has ended.");
         };
-        ControlHandler {
+        Ok(ControlHandler {
             handle: tokio::spawn(cntrl_fut),
             tx: control_tx_outter,
-        }
+        })
     }
 }

@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
 
     let handle = SystemManager::new(client, Arc::clone(&manual_trigger))
         .spawn()
-        .await;
+        .await?;
 
     handle.start().await;
     // wait here until signal is sent
