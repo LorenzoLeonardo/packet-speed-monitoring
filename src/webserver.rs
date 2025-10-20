@@ -26,7 +26,7 @@ use crate::{BIND_ADDR, manager::ControlMessage};
 struct AppState {
     tx: broadcast::Sender<String>,
     stopper: WebServerStopper,
-    control: mpsc::Sender<ControlMessage>, // new controller channel
+    sender_channel: mpsc::Sender<ControlMessage>, // new controller channel
 }
 
 #[derive(Clone)]
@@ -117,14 +117,14 @@ impl WebServerBuilder {
         self
     }
 
-    pub fn add_control(mut self, control: mpsc::Sender<ControlMessage>) -> Self {
+    pub fn add_sender_channel(mut self, control: mpsc::Sender<ControlMessage>) -> Self {
         self.control = Some(control);
         self
     }
 
     pub async fn spawn(self) -> Result<WebServerHandler> {
         let bind_addr = self.bind_addr.unwrap_or_else(|| BIND_ADDR.to_string());
-        let control = self.control.context("No control set")?;
+        let sender_channel = self.control.context("No sender channel set")?;
         let (tx, _rx) = broadcast::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let stopper = WebServerStopper {
@@ -142,7 +142,7 @@ impl WebServerBuilder {
         let state = Arc::new(AppState {
             tx,
             stopper: stopper.clone(),
-            control,
+            sender_channel,
         });
 
         let app = Router::new()
@@ -225,7 +225,7 @@ async fn sse_handler(
     // Query current status once
     let (status_tx, status_rx) = oneshot::channel();
     let _ = state
-        .control
+        .sender_channel
         .send(ControlMessage::GetStatus(status_tx))
         .await;
     let current_status = status_rx.await.unwrap_or(false);
@@ -293,20 +293,23 @@ async fn index_handler() -> Html<String> {
 }
 
 async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let _ = state.control.send(ControlMessage::Start).await;
+    let _ = state.sender_channel.send(ControlMessage::Start).await;
     broadcast_status(&state.tx, true).await; // <-- broadcast to all clients
     Json(json!({ "ok": true, "running": true }))
 }
 
 async fn stop_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let _ = state.control.send(ControlMessage::Stop).await;
+    let _ = state.sender_channel.send(ControlMessage::Stop).await;
     broadcast_status(&state.tx, false).await; // <-- broadcast to all clients
     Json(json!({ "ok": true, "running": false }))
 }
 
 async fn status_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let (tx, rx) = oneshot::channel();
-    let _ = state.control.send(ControlMessage::GetStatus(tx)).await;
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetStatus(tx))
+        .await;
     let running = rx.await.unwrap_or(false);
     Json(json!({ "running": running }))
 }

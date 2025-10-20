@@ -65,7 +65,7 @@ impl SystemManager {
         let web_handler = WebServerBuilder::new(client.clone())
             .bind_addr(BIND_ADDR)
             .cert_paths(TLS_CERT, TLS_KEY)
-            .add_control(control_tx.clone())
+            .add_sender_channel(control_tx.clone())
             .spawn()
             .await?;
 
