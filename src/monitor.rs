@@ -1,9 +1,15 @@
+mod listener;
+mod publisher;
+
 use anyhow::{Context, Result};
 use async_pcap::AsyncCaptureHandle;
 use ipc_broker::client::IPCClient;
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
-use crate::{device::DeviceInfo, listener::PacketListenerBuilder, publisher::PublisherBuilder};
+use crate::{
+    device::DeviceInfo,
+    monitor::{listener::PacketListenerBuilder, publisher::PublisherBuilder},
+};
 
 pub struct PacketMonitor {
     async_capture_handle: AsyncCaptureHandle,
