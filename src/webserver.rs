@@ -238,7 +238,7 @@ async fn sse_handler(
     .to_string();
 
     // Create an mpsc channel for pushing SSE events manually
-    let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
+    let (tx, rx_sse) = mpsc::channel::<Result<Event, Infallible>>(16);
 
     // Spawn a background task that forwards both the initial event and broadcast updates
     tokio::spawn(async move {
