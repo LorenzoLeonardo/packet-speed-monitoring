@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
-use crate::speed_info::SpeedInfo;
+use crate::monitor::speed_info::SpeedInfo;
 
 /// Represents the data to broadcast to subscribers
 #[derive(Serialize, Deserialize, Debug, Clone)]

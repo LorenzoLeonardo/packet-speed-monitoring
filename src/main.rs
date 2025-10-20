@@ -1,10 +1,8 @@
-mod device;
 mod helpers;
 mod logger;
 mod manager;
 mod monitor;
 mod signal;
-mod speed_info;
 mod webserver;
 
 use std::sync::Arc;
