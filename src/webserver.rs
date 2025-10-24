@@ -1,6 +1,6 @@
 use std::{
     convert::Infallible,
-    net::{Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     str::FromStr,
     sync::{
         Arc,
@@ -11,7 +11,9 @@ use std::{
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
+    body::{self, Body},
     extract::State,
+    http::Request,
     response::{Redirect, Sse, sse::Event},
     routing::{get, post},
 };
@@ -162,6 +164,7 @@ impl WebServerBuilder {
             .route("/start", post(start_handler))
             .route("/stop", post(stop_handler))
             .route("/status", get(status_handler))
+            .route("/select", post(select_handler))
             .with_state(state)
             .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)));
 
@@ -238,7 +241,7 @@ async fn sse_handler(
     let mut rx = state.tx.subscribe();
     let mut stopper = state.stopper.clone();
 
-    // Query current status once
+    // Query current status
     let (status_tx, status_rx) = oneshot::channel();
     let _ = state
         .sender_channel
@@ -246,33 +249,30 @@ async fn sse_handler(
         .await;
     let current_status = status_rx.await.unwrap_or(false);
 
-    // Serialize the initial "status" message
-    let initial_event = json!({
-        "type": "status",
-        "running": current_status
-    })
-    .to_string();
-
+    // Query device list
     let (devinfo_tx, devinfo_rx) = oneshot::channel();
     let _ = state
         .sender_channel
         .send(ControlMessage::GetDeviceInfo(devinfo_tx))
         .await;
-    let dev_info = devinfo_rx.await.unwrap_or(DeviceInfo {
-        name: String::from(""),
-        desc: String::from(""),
-        device_ip: Ipv4Addr::new(0, 0, 0, 0),
-        network_ip: Ipv4Addr::new(0, 0, 0, 0),
-        netmask: Ipv4Addr::new(0, 0, 0, 0),
-    });
+    let dev_info = devinfo_rx.await.unwrap_or(Vec::new());
 
-    let device_info_event = json!({
-        "type": "device_info",
-        "device_name": dev_info.name,
-        "description": dev_info.desc,
-        "device_ip": dev_info.device_ip.to_string(),
-        "network_ip": dev_info.network_ip.to_string(),
-        "subnet_mask": dev_info.netmask.to_string()
+    // Query selected device
+    let (selected_tx, selected_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetSelectedDevice(selected_tx))
+        .await;
+    let selected = selected_rx.await.unwrap_or(None);
+
+    // Send a single "init" message with status, devices, and selected
+    let init_event = json!({
+        "type": "init",
+        "status": {
+            "running": current_status
+        },
+        "devices": dev_info,
+        "selected": selected
     })
     .to_string();
 
@@ -282,18 +282,8 @@ async fn sse_handler(
 
     // Spawn a background task that forwards both the initial event and broadcast updates
     tokio::spawn(async move {
-        // Send the initial event
-        if let Err(e) = tx.send(Ok(Event::default().data(initial_event))).await {
+        if let Err(e) = tx.send(Ok(Event::default().data(init_event))).await {
             log::error!("{e}");
-            return;
-        }
-
-        if tx
-            .send(Ok(Event::default().data(device_info_event)))
-            .await
-            .is_err()
-        {
-            log::warn!("Client disconnected before device info sent.");
             return;
         }
 
@@ -366,4 +356,62 @@ async fn broadcast_status(tx: &broadcast::Sender<String>, running: bool) {
         "running": running
     });
     let _ = tx.send(payload.to_string());
+}
+
+async fn broadcast_device_list(state: Arc<AppState>) {
+    // Query current status
+    let (status_tx, status_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetStatus(status_tx))
+        .await;
+    let current_status = status_rx.await.unwrap_or(false);
+
+    // Query device list
+    let (devinfo_tx, devinfo_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetDeviceInfo(devinfo_tx))
+        .await;
+    let dev_info = devinfo_rx.await.unwrap_or(Vec::new());
+
+    // Query selected device
+    let (selected_tx, selected_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetSelectedDevice(selected_tx))
+        .await;
+    let selected = selected_rx.await.unwrap_or(None);
+
+    // Send a single "init" message with status, devices, and selected
+    let payload = json!({
+        "type": "init",
+        "status": {
+            "running": current_status
+        },
+        "devices": dev_info,
+        "selected": selected
+    })
+    .to_string();
+
+    let _ = state.tx.send(payload.to_string());
+}
+
+async fn select_handler(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+) -> Json<serde_json::Value> {
+    let bytes = body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let selection = serde_json::from_slice::<DeviceInfo>(&bytes).unwrap();
+    // Convert JSON into DeviceInfo
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::SelectDevice(selection.clone()))
+        .await;
+
+    broadcast_device_list(state.clone()).await;
+
+    Json(json!({ "ok": true }))
 }

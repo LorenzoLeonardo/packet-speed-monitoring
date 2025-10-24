@@ -2,11 +2,11 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use anyhow::{Context, Result};
 use async_pcap::{ConnectionStatus, Device};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::helpers;
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DeviceInfo {
     pub name: String,
     pub desc: String,
