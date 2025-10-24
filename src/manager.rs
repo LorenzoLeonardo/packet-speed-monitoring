@@ -22,7 +22,9 @@ pub enum ControlMessage {
     Start,
     Stop,
     GetStatus(oneshot::Sender<bool>),
-    GetDeviceInfo(oneshot::Sender<DeviceInfo>),
+    GetDeviceInfo(oneshot::Sender<Vec<DeviceInfo>>),
+    SelectDevice(DeviceInfo),
+    GetSelectedDevice(oneshot::Sender<Option<DeviceInfo>>),
     Quit,
 }
 
@@ -75,7 +77,9 @@ impl SystemManager {
             .await?;
 
         let cntrl_fut = async move {
+            let available_devices: Vec<DeviceInfo> = DeviceInfo::find_connected_devices();
             let mut packet_monitor: Option<PacketMonitor> = None;
+            let mut selected_device: Option<DeviceInfo> = None;
             log::info!("[manager] SystemManager has started.");
             while let Some(msg) = control_rx.recv().await {
                 let client = client.clone();
@@ -85,15 +89,16 @@ impl SystemManager {
                             log::warn!("[manager] Already running, ignoring Start.");
                             continue;
                         }
-
-                        match PacketMonitor::start(client.clone()).await {
-                            Ok(pm_handler) => {
-                                packet_monitor = Some(pm_handler);
-                                log::info!("[manager] Started PacketMonitor");
-                            }
-                            Err(e) => {
-                                log::error!("[manager] Failed to start packet monitor: {e}");
-                                signal_handle.notify_one();
+                        if let Some(device) = &selected_device {
+                            match PacketMonitor::start(client.clone(), device.clone()).await {
+                                Ok(pm_handler) => {
+                                    packet_monitor = Some(pm_handler);
+                                    log::info!("[manager] Started PacketMonitor");
+                                }
+                                Err(e) => {
+                                    log::error!("[manager] Failed to start packet monitor: {e}");
+                                    signal_handle.notify_one();
+                                }
                             }
                         }
                     }
@@ -109,9 +114,15 @@ impl SystemManager {
                         let _ = reply_tx.send(running);
                     }
                     ControlMessage::GetDeviceInfo(reply_tx) => {
-                        if let Some(info) = &packet_monitor {
-                            let _ = reply_tx.send(info.device_info.clone());
-                        }
+                        let _ = reply_tx.send(available_devices.clone());
+                    }
+                    ControlMessage::SelectDevice(device_info) => {
+                        // Set selected device
+                        selected_device = Some(device_info.clone());
+                        log::info!("[manager] Selected device: {selected_device:?}");
+                    }
+                    ControlMessage::GetSelectedDevice(reply_tx) => {
+                        let _ = reply_tx.send(selected_device.clone());
                     }
                     ControlMessage::Quit => {
                         log::info!("[manager] SystemManager is exiting...");

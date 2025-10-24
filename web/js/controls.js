@@ -19,13 +19,17 @@ export function setupControls() {
     const startBtn = document.getElementById("start-btn");
     const stopBtn = document.getElementById("stop-btn");
 
-    startBtn.addEventListener("click", async () => {
-        await fetch("/start", { method: "POST" });
-        toggleButtons(true);
-    });
+    // Attach to buttons
+    startBtn.addEventListener("click", startListener);
+    stopBtn.addEventListener("click", stopListener);
+}
 
-    stopBtn.addEventListener("click", async () => {
-        await fetch("/stop", { method: "POST" });
-        toggleButtons(false);
-    });
+export async function startListener() {
+    await fetch("/start", { method: "POST" });
+    toggleButtons(true);
+}
+
+export async function stopListener() {
+    await fetch("/stop", { method: "POST" });
+    toggleButtons(false);
 }
