@@ -295,6 +295,12 @@ async fn sse_handler(
                     break;
                 }
 
+                // Check if client has gone (receiver dropped)
+                _ = tx.closed() => {
+                    log::info!("[webserver] SSE channel closed (client disconnected early).");
+                    break;
+                }
+
                 // Receive from broadcast channel
                 msg = rx.recv() => {
                     match msg {
