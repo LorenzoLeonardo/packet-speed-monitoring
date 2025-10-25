@@ -106,7 +106,7 @@ function updateSelectedDevice(dev) {
     if (idx === -1) return;
     deviceSelect.value = idx;
 
-    document.getElementById("device-name").textContent = dev.name;
+    //document.getElementById("device-name").textContent = dev.name;
     document.getElementById("device-desc").textContent = dev.desc;
     document.getElementById("device-ip").textContent = dev.device_ip;
     document.getElementById("network-ip").textContent = dev.network_ip;
