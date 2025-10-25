@@ -18,14 +18,6 @@
     <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
   </section>
 
-  <div>
-    <label for="device-select"><b>Select Device:</b></label>
-    <select id="device-select">
-      <option value="">-- Loading devices... --</option>
-    </select>
-  </div>
-
-  <div id="device-info" style="margin-top: 1em; font-family: monospace;"></div>
   <!-- New Device Info Table -->
   <section class="device-info-section">
     <h2>Device Information</h2>
@@ -33,7 +25,11 @@
       <tbody>
         <tr>
           <th>Device Name</th>
-          <td id="device-name">—</td>
+          <td id="device-name">
+            <select id="device-select">
+              <option value="">-- Loading devices... --</option>
+            </select>
+          </td>
         </tr>
         <tr>
           <th>Description</th>
