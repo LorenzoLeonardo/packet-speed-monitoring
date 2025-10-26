@@ -51,16 +51,19 @@ label {
 
 /* Device Table */
 #device-table {
-  width: 100%;
+  width: auto; /* Let the table size itself based on content */
   border-collapse: collapse;
   border: 1px solid #0d47a1;
   background-color: white;
+  table-layout: auto; /* Key: allows flexible column width */
+  max-width: 100%; /* prevent overflow */
 }
 
 #device-table th,
 #device-table td {
   border: 1px solid #0d47a1;
   padding: 8px 10px;
+  white-space: nowrap; /* Prevent breaking if you want columns to expand */
 }
 
 #device-table td#device-name {
@@ -74,7 +77,7 @@ label {
   box-sizing: border-box;
   font-size: 1em;
   padding: 6px 8px;
-  border: 1px solid #0d47a1;
+  border: 1px solid white;
   /* match table border */
   border-radius: 6px;
   background-color: white;
@@ -113,16 +116,15 @@ label {
 #device-table th {
   background: #0d47a1;
   color: #fff;
-  width: 20%;
   text-align: left;
   vertical-align: top;
+  font-weight: bold;
 }
 
 #device-table td {
-  width: 100%;
+  white-space: normal;
+  word-wrap: break-word;
   color: #000;
-  padding: 8px 10px;
-  /* Alternate colors */
   background-color: white;
 }
 
