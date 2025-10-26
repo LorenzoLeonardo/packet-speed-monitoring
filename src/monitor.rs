@@ -25,7 +25,7 @@ impl PacketMonitor {
         // Spawn the packet listener and transmit the BroadcastData into the Publisher
         let (packet_listener_handle, async_capture_handle) =
             PacketListenerBuilder::new(device_info.clone())
-                .load_dns_resolver()?
+                .init_hostname_manager()
                 .transmitter_broadcast_data_channel(broadcaster_tx)
                 .spawn()
                 .await?;
