@@ -233,10 +233,7 @@ async fn sse_handler(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let client_id = state.client_count.fetch_add(1, Ordering::SeqCst) + 1;
-    log::info!(
-        "[webserver] A client browser has connected. Total clients: {}",
-        client_id
-    );
+    log::info!("[webserver] A client browser has connected. Total clients: {client_id}");
     // Each new client gets its own receiver
     let mut rx = state.tx.subscribe();
     let mut stopper = state.stopper.clone();
@@ -323,10 +320,7 @@ async fn sse_handler(
             }
         }
         let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
-        log::info!(
-            "[webserver] Client disconnected. Remaining clients: {}",
-            remaining
-        );
+        log::info!("[webserver] Client disconnected. Remaining clients: {remaining}");
     });
 
     // Convert the mpsc receiver into an SSE-compatible stream
