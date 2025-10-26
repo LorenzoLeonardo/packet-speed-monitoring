@@ -5,7 +5,7 @@ use async_pcap::Packet;
 use etherparse::{IpNumber, Ipv4HeaderSlice, UdpHeaderSlice};
 use tokio::sync::Mutex;
 
-pub async fn get_hostname_from_dns_to_cache(
+pub async fn update_hostname_cache_from_dns(
     ip: &Ipv4Addr,
     dns: AsyncDnsResolver,
     hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
@@ -59,7 +59,7 @@ async fn get_or_resolve_hostname(
     hostname
 }
 
-pub async fn get_hostname_from_dhcp_to_cache(
+pub async fn update_hostname_cache_from_dhcp(
     packet: &Packet,
     hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
 ) {
