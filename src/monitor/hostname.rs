@@ -66,6 +66,19 @@ pub async fn get_hostname_from_dhcp_to_cache(
     if packet.data.len() > 14
         && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
     {
+        let src_ip = &ip.source_addr();
+        // Identify IP address
+        let hostname = {
+            let cache_guard = hostname_cache.lock().await;
+            cache_guard
+                .get(src_ip)
+                .cloned()
+                .unwrap_or_else(|| src_ip.to_string())
+        };
+        // If hostname is already known, skip DHCP parsing
+        if hostname != src_ip.to_string() {
+            return;
+        }
         // Identify UDP layer
         if ip.protocol() == IpNumber::UDP {
             let ip_header_len = ip.slice().len();

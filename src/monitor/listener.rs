@@ -127,10 +127,10 @@ async fn process_next_packet(
 ) -> Result<(), async_pcap::Error> {
     match packet {
         Ok(packet) => {
-            hostname::get_hostname_from_dhcp_to_cache(&packet, hostname_cache).await;
             if packet.data.len() > 14
                 && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
             {
+                hostname::get_hostname_from_dhcp_to_cache(&packet, hostname_cache).await;
                 speed_info::update_stats(
                     ip.source_addr(),
                     ip.destination_addr(),
