@@ -1,8 +1,63 @@
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
+use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::Packet;
 use etherparse::{IpNumber, Ipv4HeaderSlice, UdpHeaderSlice};
 use tokio::sync::Mutex;
+
+pub async fn get_hostname_from_dns_to_cache(
+    ip: &Ipv4Addr,
+    dns: AsyncDnsResolver,
+    hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+) -> String {
+    let hostname = {
+        let cache_guard = hostname_cache.lock().await;
+        cache_guard
+            .get(ip)
+            .cloned()
+            .unwrap_or_else(|| ip.to_string())
+    };
+
+    if hostname == ip.to_string() {
+        let hostname_cache = hostname_cache.clone();
+        let ip_copy = *ip;
+        let dns_inner = dns.clone();
+        tokio::spawn(async move {
+            let _ = get_or_resolve_hostname(dns_inner, ip_copy, hostname_cache).await;
+        });
+    }
+    hostname
+}
+
+async fn get_or_resolve_hostname(
+    dns: AsyncDnsResolver,
+    ip: Ipv4Addr,
+    cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+) -> String {
+    {
+        let cache_guard = cache.lock().await;
+        if let Some(name) = cache_guard.get(&ip) {
+            return name.clone();
+        }
+    }
+
+    let resolved = dns.reverse_lookup(ip).await;
+
+    let hostname = match resolved {
+        Ok(name) => {
+            log::debug!("Resolved {ip} -> {name}");
+            name
+        }
+        Err(_) => {
+            log::warn!("No reverse DNS for {ip}");
+            ip.to_string()
+        }
+    };
+
+    let mut cache_guard = cache.lock().await;
+    cache_guard.insert(ip, hostname.clone());
+    hostname
+}
 
 pub async fn get_hostname_from_dhcp_to_cache(
     packet: &Packet,

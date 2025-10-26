@@ -162,22 +162,8 @@ async fn broadcast_stats(
         let down_mbps =
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
 
-        let hostname = {
-            let cache_guard = hostname_cache.lock().await;
-            cache_guard
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| ip.to_string())
-        };
-
-        if hostname == ip.to_string() {
-            let hostname_cache = hostname_cache.clone();
-            let ip_copy = *ip;
-            let dns_inner = dns.clone();
-            tokio::spawn(async move {
-                let _ = get_or_resolve_hostname(dns_inner, ip_copy, hostname_cache).await;
-            });
-        }
+        let hostname =
+            hostname::get_hostname_from_dns_to_cache(ip, dns.clone(), hostname_cache).await;
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
         speed_info::update_max_speed_local(max_speeds, &current);
@@ -195,34 +181,4 @@ async fn broadcast_stats(
     {
         log::warn!("{e}");
     }
-}
-
-async fn get_or_resolve_hostname(
-    dns: AsyncDnsResolver,
-    ip: Ipv4Addr,
-    cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
-) -> String {
-    {
-        let cache_guard = cache.lock().await;
-        if let Some(name) = cache_guard.get(&ip) {
-            return name.clone();
-        }
-    }
-
-    let resolved = dns.reverse_lookup(ip).await;
-
-    let hostname = match resolved {
-        Ok(name) => {
-            log::debug!("Resolved {ip} -> {name}");
-            name
-        }
-        Err(_) => {
-            log::warn!("No reverse DNS for {ip}");
-            ip.to_string()
-        }
-    };
-
-    let mut cache_guard = cache.lock().await;
-    cache_guard.insert(ip, hostname.clone());
-    hostname
 }
