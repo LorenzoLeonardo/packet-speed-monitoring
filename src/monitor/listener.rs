@@ -162,8 +162,8 @@ async fn broadcast_stats(
         let down_mbps =
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
 
-        let hostname =
-            hostname::update_hostname_cache_from_dns(ip, dns.clone(), hostname_cache).await;
+        hostname::update_hostname_cache_from_dns(ip, dns.clone(), hostname_cache).await;
+        let hostname = hostname::gethostname(ip, hostname_cache).await;
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
         speed_info::update_max_speed_local(max_speeds, &current);
