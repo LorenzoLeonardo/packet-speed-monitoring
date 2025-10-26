@@ -57,13 +57,11 @@ impl PacketListenerBuilder {
         let dns = self.dns.context("Missing DNS resolver")?;
         let broadcaster_tx = self.broadcaster_tx.context("Missing broadcaster channel")?;
         let device = Device::try_from(&self.device)?;
-        let cap = Capture::from_device(device)
-            .context("Failed to open capture from device")?
+        let cap = Capture::from_device(device)?
             .promisc(true)
             .snaplen(SNAPLEN_SPEED_MONITOR)
             .timeout(CAPTURE_TIMEOUT_MS)
-            .open()
-            .context("Failed to start async capture")?;
+            .open()?;
         let (async_capture, async_handle) = AsyncCapture::new(cap);
         Ok((
             tokio::spawn(async move {
