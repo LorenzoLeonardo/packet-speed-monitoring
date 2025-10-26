@@ -110,7 +110,7 @@ impl DeviceInfo {
                 }
             })
             .collect();
-        log::info!("Filtered connected devices: {:#?}", filtered);
+        log::info!("Filtered connected devices: {filtered:#?}");
         filtered
     }
 }
