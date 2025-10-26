@@ -130,7 +130,7 @@ async fn process_next_packet(
             if packet.data.len() > 14
                 && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
             {
-                hostname::get_hostname_from_dhcp_to_cache(&packet, hostname_cache).await;
+                hostname::update_hostname_cache_from_dhcp(&packet, hostname_cache).await;
                 speed_info::update_stats(
                     ip.source_addr(),
                     ip.destination_addr(),
@@ -163,7 +163,7 @@ async fn broadcast_stats(
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
 
         let hostname =
-            hostname::get_hostname_from_dns_to_cache(ip, dns.clone(), hostname_cache).await;
+            hostname::update_hostname_cache_from_dns(ip, dns.clone(), hostname_cache).await;
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
         speed_info::update_max_speed_local(max_speeds, &current);
