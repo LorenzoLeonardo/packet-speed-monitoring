@@ -69,7 +69,7 @@ function populateDropdown(devices, selectedDevice = null) {
     devices.forEach((dev, i) => {
         const opt = document.createElement("option");
         opt.value = i;
-        opt.textContent = `(${dev.name})`;
+        opt.textContent = `${dev.name}`;
 
         // Auto-select by matching device_ip
         if (selectedDevice && dev.device_ip === selectedDevice.device_ip) {
