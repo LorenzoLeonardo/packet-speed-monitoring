@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::{AsyncCapture, AsyncCaptureHandle, Capture, Device, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
-use tokio::sync::{Mutex, mpsc::UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::monitor::device::DeviceInfo;
-use crate::monitor::hostname;
+use crate::monitor::hostname::HostnameManager;
 use crate::monitor::publisher::BroadcastData;
 use crate::monitor::speed_info::{self, SpeedInfo, Stats};
 
@@ -21,7 +20,7 @@ const CAPTURE_TIMEOUT_MS: i32 = 500;
 /// Builder for configuring and running the packet listener
 pub struct PacketListenerBuilder {
     device: DeviceInfo,
-    dns: Option<AsyncDnsResolver>,
+    hostname_mgr: Option<HostnameManager>,
     broadcaster_tx: Option<UnboundedSender<Vec<BroadcastData>>>,
 }
 
@@ -30,16 +29,15 @@ impl PacketListenerBuilder {
     pub fn new(device: DeviceInfo) -> Self {
         Self {
             device,
-            dns: None,
+            hostname_mgr: None,
             broadcaster_tx: None,
         }
     }
 
     /// Create a default DNS resolver if not provided
-    pub fn load_dns_resolver(mut self) -> Result<Self> {
-        let resolver = AsyncDnsResolver::new();
-        self.dns = Some(resolver);
-        Ok(self)
+    pub fn init_hostname_manager(mut self) -> Self {
+        self.hostname_mgr = Some(HostnameManager::new(AsyncDnsResolver::new()));
+        self
     }
 
     /// Set broadcast channel
@@ -55,7 +53,7 @@ impl PacketListenerBuilder {
     pub async fn spawn(self) -> Result<(tokio::task::JoinHandle<()>, AsyncCaptureHandle)> {
         let subnet = self.device.network_ip;
         let mask = self.device.netmask;
-        let dns = self.dns.context("Missing DNS resolver")?;
+        let hostname_mgr: HostnameManager = self.hostname_mgr.context("Missing DNS resolver")?;
         let broadcaster_tx = self.broadcaster_tx.context("Missing broadcaster channel")?;
         let device = Device::try_from(&self.device)?;
         let cap = Capture::from_device(device)?
@@ -66,7 +64,7 @@ impl PacketListenerBuilder {
         let (async_capture, async_handle) = AsyncCapture::new(cap);
         Ok((
             tokio::spawn(async move {
-                run_capture_loop(async_capture, dns, subnet, mask, broadcaster_tx).await
+                run_capture_loop(async_capture, &hostname_mgr, subnet, mask, broadcaster_tx).await
             }),
             async_handle,
         ))
@@ -76,7 +74,7 @@ impl PacketListenerBuilder {
 /// Core capture loop
 async fn run_capture_loop(
     cap: AsyncCapture,
-    dns: AsyncDnsResolver,
+    hostname_mgr: &HostnameManager,
     subnet: Ipv4Addr,
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
@@ -84,23 +82,20 @@ async fn run_capture_loop(
     log::info!("[listener] packet listener task started.");
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
-    let hostname_cache = Arc::new(Mutex::new(HashMap::new()));
     let delay = get_poll_delay();
     let mut last = Instant::now();
 
     while let Some(packet) = cap.next_packet().await {
-        if let Err(e) =
-            process_next_packet(packet, &subnet, &mask, &mut stats, &hostname_cache).await
+        if let Err(e) = process_next_packet(packet, &subnet, &mask, &mut stats, hostname_mgr).await
         {
             log::debug!("Packet processing error: {e}");
         }
         let last_elapsed = last.elapsed();
         if last_elapsed >= Duration::from_millis(delay) {
             broadcast_stats(
-                dns.clone(),
                 &mut stats,
                 &mut max_speeds,
-                &hostname_cache,
+                hostname_mgr,
                 &broadcaster_tx,
                 last_elapsed,
             )
@@ -123,14 +118,14 @@ async fn process_next_packet(
     subnet: &Ipv4Addr,
     mask: &Ipv4Addr,
     stats: &mut HashMap<Ipv4Addr, Stats>,
-    hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+    hostname_mgr: &HostnameManager,
 ) -> Result<(), async_pcap::Error> {
     match packet {
         Ok(packet) => {
             if packet.data.len() > 14
                 && let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..])
             {
-                hostname::update_hostname_cache_from_dhcp(&packet, hostname_cache).await;
+                hostname_mgr.update_from_dhcp(&packet).await;
                 speed_info::update_stats(
                     ip.source_addr(),
                     ip.destination_addr(),
@@ -148,10 +143,9 @@ async fn process_next_packet(
 }
 
 async fn broadcast_stats(
-    dns: AsyncDnsResolver,
     stats: &mut HashMap<Ipv4Addr, Stats>,
     max_speeds: &mut HashMap<Ipv4Addr, SpeedInfo>,
-    hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+    hostname_mgr: &HostnameManager,
     broadcaster_tx: &UnboundedSender<Vec<BroadcastData>>,
     elapsed_secs: Duration,
 ) {
@@ -162,8 +156,9 @@ async fn broadcast_stats(
         let down_mbps =
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
 
-        hostname::update_hostname_cache_from_dns(ip, dns.clone(), hostname_cache).await;
-        let hostname = hostname::gethostname(ip, hostname_cache).await;
+        hostname_mgr.update_from_dns(ip).await;
+
+        let hostname = hostname_mgr.get_hostname(ip).await;
 
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
         speed_info::update_max_speed_local(max_speeds, &current);
