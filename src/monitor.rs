@@ -1,4 +1,5 @@
 pub mod device;
+mod hostname;
 mod listener;
 mod publisher;
 mod speed_info;
