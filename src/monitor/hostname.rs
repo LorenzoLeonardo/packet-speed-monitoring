@@ -5,11 +5,22 @@ use async_pcap::Packet;
 use etherparse::{IpNumber, Ipv4HeaderSlice, UdpHeaderSlice};
 use tokio::sync::Mutex;
 
+pub async fn gethostname(
+    ip: &Ipv4Addr,
+    hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
+) -> String {
+    let cache_guard = hostname_cache.lock().await;
+    cache_guard
+        .get(ip)
+        .cloned()
+        .unwrap_or_else(|| ip.to_string())
+}
+
 pub async fn update_hostname_cache_from_dns(
     ip: &Ipv4Addr,
     dns: AsyncDnsResolver,
     hostname_cache: &Arc<Mutex<HashMap<Ipv4Addr, String>>>,
-) -> String {
+) {
     let hostname = {
         let cache_guard = hostname_cache.lock().await;
         cache_guard
@@ -22,11 +33,11 @@ pub async fn update_hostname_cache_from_dns(
         let hostname_cache = hostname_cache.clone();
         let ip_copy = *ip;
         let dns_inner = dns.clone();
+        // Spawn a task to resolve the hostname without blocking
         tokio::spawn(async move {
             let _ = get_or_resolve_hostname(dns_inner, ip_copy, hostname_cache).await;
         });
     }
-    hostname
 }
 
 async fn get_or_resolve_hostname(
