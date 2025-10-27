@@ -1,8 +1,25 @@
 body {
+  flex: 1;
   font-family: sans-serif;
-  padding: 20px;
+  padding: 0 40px;
   background: #bbdefb;
   color: #0d47a1;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+footer {
+  text-align: center;
+  padding: 40px 0;
+  background:  #bbdefb;
+  color: white;
+  margin-top: auto; /* pushes footer to bottom */
+  font-size: 0.9em;
 }
 
 h1 {
@@ -43,7 +60,7 @@ label {
 .device-info-section {
   display: block;
   width: 50%;
-  margin: 10px 0 50px 0px;
+  margin: 10px 0 10px 0px;
   /* left alignment */
   float: left;
   /* stay on the left side */
@@ -171,10 +188,6 @@ label {
 }
 
 /* Speed Section */
-.speed-section {
-  margin-top: 50px;
-}
-
 #speed-table {
   width: 100%;
   border-collapse: collapse;
@@ -221,6 +234,7 @@ tbody tr:nth-child(even) {
 
 /* Controls Section */
 .controls-section {
+  margin-top: 100px;
   display: block;
   width: 100%;
   float: left;
