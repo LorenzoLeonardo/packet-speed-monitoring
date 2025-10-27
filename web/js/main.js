@@ -69,7 +69,9 @@ function populateDropdown(devices, selectedDevice = null) {
     devices.forEach((dev, i) => {
         const opt = document.createElement("option");
         opt.value = i;
-        opt.textContent = `${dev.name}`;
+        opt.textContent = dev.desc && dev.desc.trim() !== ""
+            ? dev.desc
+            : dev.name;
 
         // Auto-select by matching device_ip
         if (selectedDevice && dev.device_ip === selectedDevice.device_ip) {
@@ -83,7 +85,21 @@ function populateDropdown(devices, selectedDevice = null) {
 deviceSelect.addEventListener("change", async (e) => {
 
     const idx = e.target.value;
-    if (idx === "") return;
+    if (idx === "") {
+        // 🧹 Clear device info when "Select a device" is chosen
+        document.getElementById("device-desc").textContent = "—";
+        document.getElementById("device-ip").textContent = "—";
+        document.getElementById("network-ip").textContent = "—";
+        document.getElementById("subnet-mask").textContent = "—";
+
+        // Optionally stop monitoring here too
+        try {
+            stopListener();
+        } catch (err) {
+            console.warn("Failed to stop monitoring:", err);
+        }
+        return;
+    }
 
     const dev = deviceList[idx];
     try {
