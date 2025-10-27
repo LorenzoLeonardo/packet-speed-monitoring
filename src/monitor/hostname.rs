@@ -19,6 +19,28 @@ pub struct DhcpLease {
     pub last_seen: Instant,
 }
 
+impl std::fmt::Display for DhcpLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mac_str = self
+            .mac
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(":");
+
+        write!(
+            f,
+            "MAC={} IP={} HOSTNAME={} LAST_SEEN={:?}",
+            mac_str,
+            self.ip
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "<none>".into()),
+            self.hostname.clone().unwrap_or_else(|| "<none>".into()),
+            self.last_seen
+        )
+    }
+}
+
 pub struct HostnameManager {
     dns: AsyncDnsResolver,
     cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
@@ -144,8 +166,8 @@ impl HostnameManager {
             }
 
             match msg_type {
-                1 => log::debug!("DHCP DISCOVER from {:?}", entry),
-                3 => log::debug!("DHCP REQUEST from {:?}", entry),
+                1 => log::info!("DHCP DISCOVER from {entry}"),
+                3 => log::info!("DHCP REQUEST from {entry}"),
                 2 | 5 => {
                     // OFFER or ACK → final IP known
                     if let Some(ip_assigned) = yiaddr_opt {
@@ -166,7 +188,15 @@ impl HostnameManager {
                     }
                 }
                 7 => {
-                    log::info!("DHCP RELEASE from {:?}", entry.mac);
+                    log::info!(
+                        "DHCP RELEASE from {}",
+                        entry
+                            .mac
+                            .iter()
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<Vec<_>>()
+                            .join(":")
+                    );
                 }
                 _ => {}
             }
