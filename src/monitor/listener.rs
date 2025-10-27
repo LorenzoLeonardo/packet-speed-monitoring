@@ -159,7 +159,6 @@ async fn broadcast_stats(
         hostname_mgr.update_from_dns(ip).await;
 
         let hostname = hostname_mgr.get_hostname(ip).await;
-
         let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps);
         speed_info::update_max_speed_local(max_speeds, &current);
         let max = max_speeds

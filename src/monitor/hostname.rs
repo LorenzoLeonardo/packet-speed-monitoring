@@ -1,50 +1,17 @@
-use std::{
-    collections::HashMap,
-    net::Ipv4Addr,
-    str,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
 use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::Packet;
-use etherparse::{IpNumber, Ipv4HeaderSlice, UdpHeaderSlice};
+use dhcproto::{
+    Decodable,
+    v4::{Decoder, DhcpOption, Message, OptionCode},
+};
+use etherparse::{Ipv4HeaderSlice, UdpHeaderSlice};
 use tokio::sync::Mutex;
-
-#[derive(Debug, Clone)]
-pub struct DhcpLease {
-    pub mac: [u8; 6],
-    pub hostname: Option<String>,
-    pub ip: Option<Ipv4Addr>,
-    pub last_seen: Instant,
-}
-
-impl std::fmt::Display for DhcpLease {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mac_str = self
-            .mac
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(":");
-
-        write!(
-            f,
-            "MAC={} IP={} HOSTNAME={} LAST_SEEN={:?}",
-            mac_str,
-            self.ip
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|| "<none>".into()),
-            self.hostname.clone().unwrap_or_else(|| "<none>".into()),
-            self.last_seen
-        )
-    }
-}
 
 pub struct HostnameManager {
     dns: AsyncDnsResolver,
     cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
-    leases: Arc<Mutex<HashMap<[u8; 6], DhcpLease>>>,
 }
 
 impl HostnameManager {
@@ -52,7 +19,6 @@ impl HostnameManager {
         Self {
             dns,
             cache: Arc::new(Mutex::new(HashMap::new())),
-            leases: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -115,173 +81,90 @@ impl HostnameManager {
 
     /// Parse and track DHCP messages.
     pub async fn update_from_dhcp(&self, packet: &Packet) {
+        // Ensure packet has Ethernet + IP
         if packet.data.len() <= 14 {
             return;
         }
 
-        // Ethernet header: bytes 6..12 = source MAC
+        // Extract source MAC (Ethernet bytes 6..12)
         let mut mac = [0u8; 6];
         mac.copy_from_slice(&packet.data[6..12]);
 
         // IPv4 header
-        let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..]) else {
-            return;
+        let ip = match Ipv4HeaderSlice::from_slice(&packet.data[14..]) {
+            Ok(ip) if ip.protocol() == etherparse::IpNumber::UDP => ip,
+            _ => return,
         };
 
-        if ip.protocol() != IpNumber::UDP {
-            return;
-        }
-
+        // UDP header
         let ip_header_len = ip.slice().len();
-        let transport_data = &packet.data[14 + ip_header_len..];
-        let Ok(udp) = UdpHeaderSlice::from_slice(transport_data) else {
-            return;
+        let udp_offset = 14 + ip_header_len;
+        let transport_data = &packet.data[udp_offset..];
+
+        let udp = match UdpHeaderSlice::from_slice(transport_data) {
+            Ok(udp) => udp,
+            Err(_) => return,
         };
 
-        let src_port = udp.source_port();
-        let dst_port = udp.destination_port();
-        if !(src_port == 68 || dst_port == 68 || src_port == 67 || dst_port == 67) {
+        let (src_port, dst_port) = (udp.source_port(), udp.destination_port());
+        if !(matches!(src_port, 67 | 68) || matches!(dst_port, 67 | 68)) {
             return;
         }
 
+        // UDP payload → DHCP decode
         let udp_payload = &transport_data[8..];
-        let msg_type = extract_dhcp_message_type(udp_payload);
-        let hostname_opt = extract_dhcp_hostname(udp_payload);
-        let yiaddr_opt = extract_dhcp_yiaddr(udp_payload);
+        let msg = match Message::decode(&mut Decoder::new(udp_payload)) {
+            Ok(msg) => msg,
+            Err(e) => {
+                log::error!("Failed to decode DHCP message: {:?}", e);
+                return;
+            }
+        };
 
-        // Update lease info
-        if let Some(msg_type) = msg_type {
-            let mut leases = self.leases.lock().await;
-            let entry = leases.entry(mac).or_insert(DhcpLease {
-                mac,
-                hostname: None,
-                ip: None,
-                last_seen: Instant::now(),
+        // Extract hostname (Option 12)
+        let hostname = msg
+            .opts()
+            .get(OptionCode::Hostname)
+            .and_then(|opt| match opt {
+                DhcpOption::Hostname(name) => Some(name.clone()),
+                _ => None,
             });
 
-            entry.last_seen = Instant::now();
+        // Extract requested IP (Option 50)
+        let ip_assigned = msg
+            .opts()
+            .get(OptionCode::RequestedIpAddress)
+            .and_then(|opt| match opt {
+                DhcpOption::RequestedIpAddress(ip) => Some(*ip),
+                _ => None,
+            })
+            // fallback to yiaddr (the "your IP address" field)
+            .or_else(|| {
+                let yiaddr = msg.yiaddr();
+                if yiaddr != Ipv4Addr::UNSPECIFIED {
+                    Some(yiaddr)
+                } else {
+                    None
+                }
+            });
 
-            if let Some(host) = hostname_opt.clone() {
-                entry.hostname = Some(host.clone());
-            }
+        if let (Some(hostname), Some(ip)) = (hostname, ip_assigned) {
+            log::info!("DHCP >> Hostname: {hostname} Assigned IP: {ip}");
 
-            match msg_type {
-                1 => log::info!("DHCP DISCOVER from {entry}"),
-                3 => log::info!("DHCP REQUEST from {entry}"),
-                2 | 5 => {
-                    // OFFER or ACK → final IP known
-                    if let Some(ip_assigned) = yiaddr_opt {
-                        entry.ip = Some(ip_assigned);
-
-                        if let Some(host) = entry.hostname.clone() {
-                            log::info!(
-                                "DHCP {}: {:?} assigned {:?} (hostname={})",
-                                if msg_type == 2 { "OFFER" } else { "ACK" },
-                                entry.mac,
-                                ip_assigned,
-                                host
-                            );
-
-                            let mut cache = self.cache.lock().await;
-                            cache.insert(ip_assigned, host);
-                        }
+            let mut cache = self.cache.lock().await;
+            cache
+                .entry(ip)
+                .and_modify(|existing| {
+                    // Only update if existing hostname is an IP (numeric)
+                    if existing.parse::<Ipv4Addr>().is_ok() {
+                        *existing = hostname.clone();
+                        log::info!("Updated cached hostname for {ip} -> {hostname}");
                     }
-                }
-                7 => {
-                    log::info!(
-                        "DHCP RELEASE from {}",
-                        entry
-                            .mac
-                            .iter()
-                            .map(|b| format!("{:02x}", b))
-                            .collect::<Vec<_>>()
-                            .join(":")
-                    );
-                }
-                _ => {}
-            }
+                })
+                .or_insert_with(|| {
+                    log::info!("Inserted new hostname for {ip} -> {hostname}");
+                    hostname.clone()
+                });
         }
-
-        // Optionally, cleanup stale leases every ~5 minutes
-        Self::cleanup_stale_leases(&self.leases).await;
     }
-
-    async fn cleanup_stale_leases(leases: &Arc<Mutex<HashMap<[u8; 6], DhcpLease>>>) {
-        let mut leases = leases.lock().await;
-        let now = Instant::now();
-        leases.retain(|_, lease| now.duration_since(lease.last_seen) < Duration::from_secs(300));
-    }
-}
-
-/* -----------------------------
-   DHCP Parsing Helpers
-------------------------------*/
-
-fn extract_dhcp_hostname(payload: &[u8]) -> Option<String> {
-    if payload.len() < 240 {
-        return None;
-    }
-    let opts = &payload[240..];
-    let mut i = 0;
-    while i < opts.len() {
-        let opt = opts[i];
-        if opt == 0xff {
-            break;
-        }
-        if opt == 0x00 {
-            i += 1;
-            continue;
-        }
-        if i + 1 >= opts.len() {
-            break;
-        }
-        let len = opts[i + 1] as usize;
-        if i + 2 + len > opts.len() {
-            break;
-        }
-        if opt == 12 {
-            if let Ok(s) = str::from_utf8(&opts[i + 2..i + 2 + len]) {
-                return Some(s.to_string());
-            } else {
-                return Some(hex::encode(&opts[i + 2..i + 2 + len]));
-            }
-        }
-        i += 2 + len;
-    }
-    None
-}
-
-fn extract_dhcp_yiaddr(payload: &[u8]) -> Option<Ipv4Addr> {
-    if payload.len() >= 20 {
-        Some(Ipv4Addr::new(
-            payload[16],
-            payload[17],
-            payload[18],
-            payload[19],
-        ))
-    } else {
-        None
-    }
-}
-
-fn extract_dhcp_message_type(payload: &[u8]) -> Option<u8> {
-    if payload.len() < 240 {
-        return None;
-    }
-    let mut i = 240;
-    while i + 2 < payload.len() {
-        let option_type = payload[i];
-        if option_type == 255 {
-            break;
-        }
-        let len = payload[i + 1] as usize;
-        if i + 2 + len > payload.len() {
-            break;
-        }
-        if option_type == 53 && len == 1 {
-            return Some(payload[i + 2]);
-        }
-        i += 2 + len;
-    }
-    None
 }
