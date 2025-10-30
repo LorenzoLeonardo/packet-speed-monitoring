@@ -181,7 +181,7 @@ async fn broadcast_stats(
         let mac = mac_mgr
             .get_as_string(ip)
             .unwrap_or_else(|| String::from("-"));
-        let current = SpeedInfo::new(ip.to_string().as_str(), &hostname, down_mbps, up_mbps, &mac);
+        let current = SpeedInfo::new(ip.to_string(), hostname, down_mbps, up_mbps, mac);
         speed_info::update_max_speed_local(max_speeds, &current);
         let max = max_speeds
             .get(ip)

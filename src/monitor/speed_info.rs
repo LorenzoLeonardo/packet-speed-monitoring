@@ -40,7 +40,7 @@ pub struct SpeedInfo {
 }
 
 impl SpeedInfo {
-    pub fn new(ip: &str, hostname: &str, down: f64, up: f64, mac: &str) -> Self {
+    pub fn new(ip: String, hostname: String, down: f64, up: f64, mac: String) -> Self {
         let timestamp = Utc::now();
         let local_time = Local::now();
 
@@ -53,9 +53,9 @@ impl SpeedInfo {
         let timezone = format!("UTC{}{:02}:{:02}", sign, hours.abs(), minutes);
 
         Self {
-            ip: ip.to_string(),
-            hostname: hostname.to_string(),
-            mac: mac.to_string(),
+            ip,
+            hostname,
+            mac,
             mbps_down: down,
             mbps_up: up,
             time_utc: timestamp.to_rfc3339(),
