@@ -25,6 +25,7 @@ export function renderRow(ip, curr, max) {
     const rowHTML = `
     <td>${ip}</td>
     <td>${curr.hostname}</td>
+    <td>${curr.mac}</td>
     <td>${formatSpeed(curr.mbps_down)}</td>
     <td>${formatSpeed(curr.mbps_up)}</td>
     <td class="divider">${formatDate(dateUTC)}</td>
