@@ -82,7 +82,7 @@ async fn run_capture_loop(
 ) {
     log::info!("[listener] packet listener task started.");
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
-    let mut mac_mgr = MacManager::new(Duration::from_secs(600)); // 10 min TTL
+    let mut mac_mgr = MacManager::new(Duration::from_secs(60)); // 1 min TTL
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
     let delay = get_poll_delay();
     let mut last = Instant::now();
@@ -180,7 +180,7 @@ async fn broadcast_stats(
         let hostname = hostname_mgr.get_hostname(ip).await;
         let mac = mac_mgr
             .get_as_string(ip)
-            .unwrap_or_else(|| String::from("-"));
+            .unwrap_or_else(|| String::from("Not Active"));
         let current = SpeedInfo::new(ip.to_string(), hostname, down_mbps, up_mbps, mac);
         speed_info::update_max_speed_local(max_speeds, &current);
         let max = max_speeds

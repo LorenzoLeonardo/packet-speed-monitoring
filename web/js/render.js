@@ -39,6 +39,9 @@ export function renderRow(ip, curr, max) {
     const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
     if (existingRow) {
         existingRow.innerHTML = rowHTML;
+
+        const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
+        existingRow.classList.toggle("inactive-row", isInactive);
     } else {
         const row = document.createElement("tr");
         row.dataset.ip = ip;
