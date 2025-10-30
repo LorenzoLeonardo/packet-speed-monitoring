@@ -1,6 +1,7 @@
 pub mod device;
 mod hostname;
 mod listener;
+mod mac;
 mod publisher;
 mod speed_info;
 
