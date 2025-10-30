@@ -256,3 +256,10 @@ tbody tr:nth-child(even) {
   padding: 5px;
   font-size: 16px;
 }
+
+.inactive-row {
+  background-color: #e0e0e0 !important; /* light gray */
+  color: #616161 !important;            /* medium gray text */
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+}
