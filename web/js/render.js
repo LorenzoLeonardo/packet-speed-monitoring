@@ -47,6 +47,8 @@ export function renderRow(ip, curr, max) {
         row.dataset.ip = ip;
         row.innerHTML = rowHTML;
         tbody.appendChild(row);
+        const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
+        row.classList.toggle("inactive-row", isInactive);
     }
 }
 
