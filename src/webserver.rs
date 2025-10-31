@@ -14,7 +14,8 @@ use axum::{
     body::{self, Body},
     extract::State,
     http::Request,
-    response::{Html, IntoResponse, Sse, sse::Event},
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Redirect, Sse, sse::Event},
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
@@ -168,7 +169,8 @@ impl WebServerBuilder {
             .route("/status", get(status_handler))
             .route("/select", post(select_handler))
             .with_state(state)
-            .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)));
+            .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)))
+            .layer(middleware::from_fn(check_paths));
 
         let server = WebServer {
             bind_addr,
@@ -229,6 +231,18 @@ impl WebServerHandler {
     pub fn stop(&self) {
         self.web_stopper.clone().stop();
     }
+}
+
+async fn check_paths(req: Request<Body>, next: Next) -> axum::response::Response {
+    let path = req.uri().path().to_string();
+    if path.starts_with("/tls/")
+        || path == "/tls"
+        || path.starts_with("/index.html")
+        || path == "/index.html"
+    {
+        return Redirect::to("/").into_response();
+    }
+    next.run(req).await
 }
 
 async fn index_handler() -> axum::response::Response {
