@@ -8,77 +8,85 @@
 </head>
 
 <body>
-  <h1>Enzo Tech Computer Solutions - Packet Speed Monitor</h1>
 
-  <!-- Controls Section -->
-  <section class="controls-section">
-    <h2>Select Timezone</h2>
-    <select id="tz-select"></select>
-    <button id="start-btn" class="btn btn-start">Start Listener</button>
-    <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
-  </section>
+  <div class="header">
+    <h1>Enzo Tech Computer Solutions - Packet Speed Monitor</h1>
+  </div>
 
-  <!-- New Device Info Table -->
-  <section class="device-info-section">
-    <h2>Device Information</h2>
-    <table id="device-table">
-      <tbody>
-        <tr>
-          <th>Device Name</th>
-          <td id="device-name">
-            <select id="device-select">
-              <option value="">-- Loading devices... --</option>
-            </select>
-          </td>
-        </tr>
-        <tr>
-          <th>Description</th>
-          <td id="device-desc">—</td>
-        </tr>
-        <tr>
-          <th>Device IP</th>
-          <td id="device-ip">—</td>
-        </tr>
-        <tr>
-          <th>Network IP</th>
-          <td id="network-ip">—</td>
-        </tr>
-        <tr>
-          <th>Subnet Mask</th>
-          <td id="subnet-mask">—</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+  <div class="container">
+    <div class="body">
+      <!-- Controls Section -->
+      <section class="controls-section">
+        <h2>Select Timezone</h2>
+        <select id="tz-select"></select>
+        <button id="start-btn" class="btn btn-start">Start Listener</button>
+        <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
+      </section>
 
-  <!-- Speed Section -->
-  <section class="speed-section">
-    <table id="speed-table">
-      <thead>
-        <tr>
-          <th>IP</th>
-          <th>Hostname</th>
-          <th>MAC Address</th>
-          <th>Download</th>
-          <th>Upload</th>
-          <th class="divider">Time</th>
-          <th class="hide-col after-timezone">Timezone</th>
-          <th>Max Download</th>
-          <th>Max Down Time</th>
-          <th>Max Upload</th>
-          <th>Max Up Time</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
+      <!-- New Device Info Table -->
+      <section class="device-info-section">
+        <h2>Device Information</h2>
+        <table id="device-table">
+          <tbody>
+            <tr>
+              <th>Device Name</th>
+              <td id="device-name">
+                <select id="device-select">
+                  <option value="">-- Loading devices... --</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <th>Description</th>
+              <td id="device-desc">—</td>
+            </tr>
+            <tr>
+              <th>Device IP</th>
+              <td id="device-ip">—</td>
+            </tr>
+            <tr>
+              <th>Network IP</th>
+              <td id="network-ip">—</td>
+            </tr>
+            <tr>
+              <th>Subnet Mask</th>
+              <td id="subnet-mask">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Speed Section -->
+      <section class="speed-section">
+        <table id="speed-table">
+          <thead>
+            <tr>
+              <th>IP</th>
+              <th>Hostname</th>
+              <th>MAC Address</th>
+              <th>Download</th>
+              <th>Upload</th>
+              <th class="divider">Time</th>
+              <th class="hide-col after-timezone">Timezone</th>
+              <th>Max Download</th>
+              <th>Max Down Time</th>
+              <th>Max Upload</th>
+              <th>Max Up Time</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+  <div class="footer">
+    <footer>
+      <p>{{copy_right}}</p>
+      <p>{{app_version}}</p>
+    </footer>
+  </div>
 
   <script type="module" src="js/main.js"></script>
-
-  <footer>
-    <p>{{copy_right}}</p>
-    <p>{{app_version}}</p>
-  </footer>
 </body>
 
 </html>

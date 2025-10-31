@@ -1,29 +1,48 @@
+html,
 body {
-  flex: 1;
-  font-family: sans-serif;
-  padding: 0 40px;
-  background: #bbdefb;
-  color: #0d47a1;
-}
-
-html, body {
   height: 100%;
   margin: 0;
   display: flex;
   flex-direction: column;
 }
 
-footer {
+body {
+  flex: 1;
+  font-family: sans-serif;
+  width: 100%;
+  background: #bbdefb;
+  color: #0d47a1;
+  min-height: 100vh;
+  /* ensure footer sits at bottom when content is short */
+}
+
+.container {
+  width: 95%;
+  margin: 0 auto;
+  /* center the container */
+  flex: 1;
+  /* allow to grow and fill space */
+}
+
+.header {
+  width: 100%;
   text-align: center;
-  padding: 40px 0;
-  background:  #bbdefb;
+  padding: 20px 0;
+  background-color: #0d47a1;
   color: white;
-  margin-top: auto; /* pushes footer to bottom */
-  font-size: 0.9em;
+}
+
+.body {
+  width: 100%;
+  /* occupy 90% of the page width */
+  background: transparent;
+  /* or a color if you want a background */
+  padding: 100px 0;
+  /* optional spacing */
 }
 
 h1 {
-  color: #0d47a1;
+  color: white;
   text-align: center;
   margin-bottom: 10px;
 }
@@ -68,19 +87,23 @@ label {
 
 /* Device Table */
 #device-table {
-  width: auto; /* Let the table size itself based on content */
+  width: auto;
+  /* Let the table size itself based on content */
   border-collapse: collapse;
   border: 1px solid #0d47a1;
   background-color: white;
-  table-layout: auto; /* Key: allows flexible column width */
-  max-width: 100%; /* prevent overflow */
+  table-layout: auto;
+  /* Key: allows flexible column width */
+  max-width: 100%;
+  /* prevent overflow */
 }
 
 #device-table th,
 #device-table td {
   border: 1px solid #0d47a1;
   padding: 8px 10px;
-  white-space: nowrap; /* Prevent breaking if you want columns to expand */
+  white-space: nowrap;
+  /* Prevent breaking if you want columns to expand */
 }
 
 #device-table td#device-name {
@@ -150,58 +173,38 @@ label {
   background-color: #e3f2fd;
 }
 
-/* --- Responsive Design for Mobile --- */
-@media (max-width: 768px) {
-  .device-info-section {
-    width: 100%;
-    margin: 15px auto;
-    padding: 10px;
-  }
-
-  #device-table,
-  #device-table tbody,
-  #device-table tr,
-  #device-table th,
-  #device-table td {
-    display: block;
-    width: 100%;
-  }
-
-  #device-table tr {
-    margin-bottom: 10px;
-    border: 1px solid #0d47a1;
-    border-radius: 6px;
-    overflow: hidden;
-  }
-
-  #device-table th {
-    background: #0d47a1;
-    color: white;
-    padding: 10px;
-  }
-
-  #device-table td {
-    background: #e3f2fd;
-    padding: 10px;
-    border-top: 1px solid #ccc;
-  }
+/* Speed Section */
+.speed-section {
+  display: flex;
+  justify-content: left;
+  width: 100%;
+  overflow-x: auto;
+  /* allows horizontal scroll if table is too wide */
+  margin-top: 20px;
+  box-sizing: border-box;
 }
 
-/* Speed Section */
+/* Centered Speed Table */
 #speed-table {
   width: 100%;
+  /* make it fit the container */
+  max-width: 100%;
+  /* prevent exceeding parent width */
   border-collapse: collapse;
   background: #fff;
-  border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 #speed-table th,
 #speed-table td {
+  width: auto;
   padding: 8px 10px;
   border: 1px solid #ccc;
   color: #000;
+  text-align: left;
+  white-space: wrap;
+  /* prevents text from wrapping (optional) */
 }
 
 #speed-table th {
@@ -234,7 +237,7 @@ tbody tr:nth-child(even) {
 
 /* Controls Section */
 .controls-section {
-  margin-top: 100px;
+  margin-top: 20px;
   display: block;
   width: 100%;
   float: left;
@@ -265,7 +268,31 @@ tbody tr:nth-child(even) {
   color: #ffffff !important;
 }
 
-footer p {
-  margin: 1px 0;        /* reduce top/bottom spacing */
-  line-height: 1;     /* tighten the line spacing */
+
+footer {
+  text-align: center;
+  padding: 10px 0;
+  background: #0d47a1;
+  color: white;
+  margin-top: auto;
+  /* pushes footer to bottom */
+  font-size: 0.9em;
+}
+
+/* Footer Container */
+.footer {
+  width: 100%;
+  background: #0d47a1;
+  /* blue background */
+  color: white;
+  text-align: center;
+  padding: 20px 0;
+  margin-top: auto;
+  /* pushes footer to the bottom */
+}
+
+.footer p {
+  margin: 2px 0;
+  line-height: 1.2;
+  font-size: 0.9em;
 }
