@@ -18,6 +18,7 @@ const SNAPLEN_SPEED_MONITOR: i32 = 1024;
 const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
 const CAPTURE_TIMEOUT_MS: i32 = 500;
 const MAC_CACHE_FILE: &str = "packet-speed-monitoring-mac-cache.json";
+const HOSTNAME_CACHE_FILE: &str = "packet-speed-monitoring-hostname-cache.json";
 
 /// Builder for configuring and running the packet listener
 pub struct PacketListenerBuilder {
@@ -37,8 +38,9 @@ impl PacketListenerBuilder {
     }
 
     /// Create a default DNS resolver if not provided
-    pub fn init_hostname_manager(mut self) -> Self {
-        self.hostname_mgr = Some(HostnameManager::new(AsyncDnsResolver::new()));
+    pub async fn init_hostname_manager(mut self) -> Self {
+        self.hostname_mgr =
+            Some(HostnameManager::load_or_new(AsyncDnsResolver::new(), HOSTNAME_CACHE_FILE).await);
         self
     }
 
@@ -196,7 +198,12 @@ async fn broadcast_stats(
             .cloned()
             .unwrap_or_else(|| current.clone());
         batch.push(BroadcastData::new(current, max));
-
+        hostname_mgr
+            .save_to_file(HOSTNAME_CACHE_FILE)
+            .await
+            .unwrap_or_else(|e| {
+                log::error!("Failed to save hostname cache: {e}");
+            });
         s.reset();
     }
 

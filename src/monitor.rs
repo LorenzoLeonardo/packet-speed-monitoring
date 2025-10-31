@@ -27,6 +27,7 @@ impl PacketMonitor {
         let (packet_listener_handle, async_capture_handle) =
             PacketListenerBuilder::new(device_info.clone())
                 .init_hostname_manager()
+                .await
                 .transmitter_broadcast_data_channel(broadcaster_tx)
                 .spawn()
                 .await?;
