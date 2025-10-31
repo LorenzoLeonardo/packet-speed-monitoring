@@ -258,8 +258,9 @@ tbody tr:nth-child(even) {
 }
 
 .inactive-row {
-  background-color: #e0e0e0 !important; /* light gray */
-  color: #616161 !important;            /* medium gray text */
-  font-weight: 600;
-  transition: background-color 0.3s ease;
+  background-color: #b71c1c !important;
+}
+
+.inactive-row td {
+  color: #ffffff !important;
 }
