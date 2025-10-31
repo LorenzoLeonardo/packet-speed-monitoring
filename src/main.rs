@@ -14,8 +14,8 @@ use tokio::sync::Notify;
 use crate::{logger::Log, manager::SystemManager};
 
 const BIND_ADDR: &str = "0.0.0.0:5247";
-const TLS_CERT: &str = "web/tls/cert.pem";
-const TLS_KEY: &str = "web/tls/key.pem";
+const TLS_CERT: &str = "tls/cert.pem";
+const TLS_KEY: &str = "tls/key.pem";
 
 async fn wait_for_remote_object(handle: &IPCClient) -> Result<()> {
     log::info!("Waiting for rob . . .");

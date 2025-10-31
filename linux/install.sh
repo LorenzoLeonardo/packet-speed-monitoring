@@ -44,6 +44,7 @@ sudo mkdir -p "$DEST_DIR"
 sudo cp "$PWD/target/release/$EXECUTABLE_NAME" "$DEST_DIR"
 sudo cp "$PWD/linux/systemd/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
 sudo cp -r "$PWD/web" "$DEST_DIR"
+sudo cp -r "$PWD/tls" "$DEST_DIR"
 sudo chmod +x "$DEST_DIR/$EXECUTABLE_NAME"
 
 sudo systemctl daemon-reload
