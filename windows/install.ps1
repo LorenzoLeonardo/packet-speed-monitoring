@@ -57,6 +57,7 @@ New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 
 Copy-Item "$PSScriptRoot\..\target\release\$ExecutableName" -Destination $DestDir
 Copy-Item "$PSScriptRoot\..\web" -Destination $DestDir -Recurse
+Copy-Item "$PSScriptRoot\..\tls" -Destination $DestDir -Recurse
 
 # === Register new Windows service ===
 Write-Host "=== Registering new service using NSSM ==="

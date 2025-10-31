@@ -235,11 +235,7 @@ impl WebServerHandler {
 
 async fn check_paths(req: Request<Body>, next: Next) -> axum::response::Response {
     let path = req.uri().path().to_string();
-    if path.starts_with("/tls/")
-        || path == "/tls"
-        || path.starts_with("/index.html")
-        || path == "/index.html"
-    {
+    if path.starts_with("/index.html") || path == "/index.html" {
         return Redirect::to("/").into_response();
     }
     next.run(req).await
