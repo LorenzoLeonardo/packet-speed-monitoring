@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
+use std::{collections::HashMap, net::Ipv4Addr, path::Path, sync::Arc};
 
 use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::Packet;
@@ -7,7 +7,14 @@ use dhcproto::{
     v4::{Decoder, DhcpOption, Message, OptionCode},
 };
 use etherparse::{Ipv4HeaderSlice, UdpHeaderSlice};
-use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use tokio::{fs, io::AsyncWriteExt, sync::Mutex};
+
+#[derive(Serialize, Deserialize)]
+struct HostEntry {
+    ip: Ipv4Addr,
+    hostname: String,
+}
 
 pub struct HostnameManager {
     dns: AsyncDnsResolver,
@@ -166,5 +173,58 @@ impl HostnameManager {
                     hostname.clone()
                 });
         }
+    }
+
+    /// Try to load hostname cache from file, or start empty if failed.
+    pub async fn load_or_new<P: AsRef<Path>>(dns: AsyncDnsResolver, path: P) -> Self {
+        match Self::load_from_file(dns.clone(), &path).await {
+            Ok(manager) => manager,
+            Err(e) => {
+                log::warn!("Failed to load hostname cache: {e}. Starting fresh.");
+                Self::new(dns)
+            }
+        }
+    }
+
+    /// Save hostname cache to JSON file — only if content changed.
+    pub async fn save_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let cache_guard = self.cache.lock().await;
+
+        let entries: Vec<HostEntry> = cache_guard
+            .iter()
+            .map(|(ip, name)| HostEntry {
+                ip: *ip,
+                hostname: name.clone(),
+            })
+            .collect();
+
+        let new_json = serde_json::to_string_pretty(&entries)?;
+        let existing_json = fs::read_to_string(path.as_ref()).await.unwrap_or_default();
+
+        if existing_json != new_json {
+            let mut file = fs::File::create(path).await?;
+            file.write_all(new_json.as_bytes()).await?;
+            file.flush().await?;
+            log::info!("Hostname cache updated ({} entries).", entries.len());
+        }
+
+        Ok(())
+    }
+
+    /// Load hostname cache from JSON file.
+    async fn load_from_file<P: AsRef<Path>>(
+        dns: AsyncDnsResolver,
+        path: P,
+    ) -> std::io::Result<Self> {
+        let data = fs::read_to_string(path).await?;
+        let entries: Vec<HostEntry> = serde_json::from_str(&data).unwrap_or_default();
+
+        let cache: HashMap<Ipv4Addr, String> =
+            entries.into_iter().map(|e| (e.ip, e.hostname)).collect();
+
+        Ok(Self {
+            dns,
+            cache: Arc::new(Mutex::new(cache)),
+        })
     }
 }
