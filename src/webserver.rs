@@ -14,12 +14,14 @@ use axum::{
     body::{self, Body},
     extract::State,
     http::Request,
-    response::{Redirect, Sse, sse::Event},
+    response::{Html, IntoResponse, Sse, sse::Event},
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
+use chrono::{Datelike, Local};
 use ipc_broker::client::IPCClient;
 use serde_json::json;
+use tera::Tera;
 use tokio::{
     sync::{
         broadcast::{self, error::RecvError},
@@ -159,7 +161,7 @@ impl WebServerBuilder {
         });
         let serve_dir = ServeDir::new("web");
         let app = Router::new()
-            .route("/", get(|| async { Redirect::to("/index.html") }))
+            .route("/", get(index_handler))
             .route("/events", get(sse_handler))
             .route("/start", post(start_handler))
             .route("/stop", post(stop_handler))
@@ -227,6 +229,20 @@ impl WebServerHandler {
     pub fn stop(&self) {
         self.web_stopper.clone().stop();
     }
+}
+
+async fn index_handler() -> axum::response::Response {
+    let tera = Tera::new("web/*.html").unwrap();
+    let mut context = tera::Context::new();
+    let year = Local::now().year();
+    let copy_right = format!("© {year} Enzo Tech Computer Solutions. All rights reserved.");
+    let version = format!("Version {}", std::env!("CARGO_PKG_VERSION"));
+
+    context.insert("copy_right", &copy_right);
+    context.insert("app_version", &version);
+
+    let contents = tera.render("index.html", &context).unwrap();
+    Html(contents).into_response()
 }
 
 async fn sse_handler(

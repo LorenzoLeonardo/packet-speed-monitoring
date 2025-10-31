@@ -264,3 +264,8 @@ tbody tr:nth-child(even) {
 .inactive-row td {
   color: #ffffff !important;
 }
+
+footer p {
+  margin: 1px 0;        /* reduce top/bottom spacing */
+  line-height: 1;     /* tighten the line spacing */
+}
