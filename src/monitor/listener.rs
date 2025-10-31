@@ -17,6 +17,7 @@ use crate::monitor::speed_info::{self, SpeedInfo, Stats};
 const SNAPLEN_SPEED_MONITOR: i32 = 1024;
 const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
 const CAPTURE_TIMEOUT_MS: i32 = 500;
+const MAC_CACHE_FILE: &str = "packet-speed-monitoring-mac-cache.json";
 
 /// Builder for configuring and running the packet listener
 pub struct PacketListenerBuilder {
@@ -82,7 +83,7 @@ async fn run_capture_loop(
 ) {
     log::info!("[listener] packet listener task started.");
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
-    let mut mac_mgr = MacManager::new(Duration::from_secs(60)); // 1 min TTL
+    let mut mac_mgr = MacManager::load_or_new(MAC_CACHE_FILE, Duration::from_secs(60)).await; // 1 min TTL
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
     let delay = get_poll_delay();
     let mut last = Instant::now();
@@ -113,6 +114,12 @@ async fn run_capture_loop(
             .await;
             last = Instant::now();
             mac_mgr.prune_expired();
+            mac_mgr
+                .save_to_file(MAC_CACHE_FILE)
+                .await
+                .unwrap_or_else(|e| {
+                    log::error!("Failed to save MAC cache: {e}");
+                });
         }
     }
     log::info!("[listener] packet listener task ended.");
@@ -137,11 +144,12 @@ async fn process_next_packet(
         Ok(packet) => {
             if packet.data.len() > 14 {
                 // Extract source MAC from Ethernet frame
-                let mut mac = [0u8; 6];
-                mac.copy_from_slice(&packet.data[6..12]);
+
                 if let Ok(ip) = Ipv4HeaderSlice::from_slice(&packet.data[14..]) {
                     // Update MAC cache
-                    mac_mgr.update(ip.source_addr(), mac);
+                    let mut mac = [0u8; 6];
+                    mac.copy_from_slice(&packet.data[6..12]);
+                    mac_mgr.update(ip.source_addr(), mac, *subnet, *mask);
                     hostname_mgr.update_from_dhcp(&packet).await;
                     speed_info::update_stats(
                         ip.source_addr(),
