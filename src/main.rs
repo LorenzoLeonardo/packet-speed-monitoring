@@ -24,9 +24,7 @@ async fn wait_for_remote_object(handle: &IPCClient) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let _log = Log::init();
+async fn run_app() -> Result<()> {
     let client = IPCClient::connect().await?;
     // Trigger via process or triggered outside by the OS to stop the process properly.
     let manual_trigger = Arc::new(Notify::new());
@@ -42,4 +40,15 @@ async fn main() -> Result<()> {
     signal::wait_until_signal(manual_trigger).await;
     handle.stop().await;
     Ok(())
+}
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize the logger, lets panic if it fails intentionally
+    // It mean disk is full or permission issue
+    let log = Log::init().await.unwrap();
+
+    let res = run_app().await;
+
+    log.shutdown().await;
+    res
 }
