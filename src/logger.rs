@@ -133,8 +133,9 @@ impl Log {
                     maybe_msg = rx.recv() => {
                         match maybe_msg {
                             Ok(msg) => {
-                                let line = format!("{}\n", msg);
-                                if let Err(e) = file.write_all(line.as_bytes()).await {
+                                let now = Local::now();
+                                let timestamped_line = format!("[{}] {}\n", now.format("%Y-%m-%d %H:%M:%S%.3f"), msg);
+                                if let Err(e) = file.write_all(timestamped_line.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
                                 }
@@ -157,8 +158,9 @@ impl Log {
                         if *shutdown_receiver.borrow() {
                             // Drain remaining messages before exiting
                             while let Ok(msg) = rx.try_recv() {
-                                let line = format!("{}\n", msg);
-                                if let Err(e) = file.write_all(line.as_bytes()).await {
+                                let now = Local::now();
+                                let timestamped_line = format!("[{}] {}\n", now.format("%Y-%m-%d %H:%M:%S%.3f"), msg);
+                                if let Err(e) = file.write_all(timestamped_line.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
                                 }
