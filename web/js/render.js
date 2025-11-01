@@ -1,4 +1,5 @@
 import { currentTZ } from './timezone.js';
+import { getSelectedDeviceIp } from "./state.js";
 
 export const rowDataMap = new Map();
 const tbody = document.querySelector("#speed-table tbody");
@@ -42,6 +43,9 @@ export function renderRow(ip, curr, max) {
 
         const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
         existingRow.classList.toggle("inactive-row", isInactive);
+
+        const isServer = curr.ip === getSelectedDeviceIp();
+        existingRow.classList.toggle("selected-device", isServer);
     } else {
         const row = document.createElement("tr");
         row.dataset.ip = ip;
@@ -49,6 +53,8 @@ export function renderRow(ip, curr, max) {
         tbody.appendChild(row);
         const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
         row.classList.toggle("inactive-row", isInactive);
+        const isServer = curr.ip === getSelectedDeviceIp();
+        row.classList.toggle("selected-device", isServer);
     }
 }
 
