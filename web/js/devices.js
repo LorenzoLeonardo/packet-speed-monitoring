@@ -1,4 +1,5 @@
 import { stopListener } from "./controls.js";
+import { setSelectedDeviceIp } from "./state.js";
 
 let deviceList = [];
 let deviceSelect = null;
@@ -71,6 +72,8 @@ export function updateSelectedDevice(dev) {
     document.getElementById("subnet-mask").textContent = dev.netmask || "—";
 
     document.querySelector("#speed-table tbody").innerHTML = "";
+
+    setSelectedDeviceIp(dev.device_ip);
 }
 
 function clearDeviceInfo() {

@@ -296,3 +296,8 @@ footer {
   line-height: 1.2;
   font-size: 0.9em;
 }
+
+/* Highlighted active device row */
+.selected-device {
+  background-color: yellow !important;
+}
