@@ -205,7 +205,7 @@ impl HostnameManager {
             let mut file = fs::File::create(path).await?;
             file.write_all(new_json.as_bytes()).await?;
             file.flush().await?;
-            log::info!("Hostname cache updated ({} entries).", entries.len());
+            log::debug!("Hostname cache updated ({} entries).", entries.len());
         }
 
         Ok(())
