@@ -362,8 +362,9 @@ async fn log_page_handler() -> impl IntoResponse {
 
     match (html_result, log_result) {
         (Ok(mut html), Ok(logs)) => {
+            let trimmed_logs = logs.trim_start();
             // Safely embed the log contents into a <script> tag so they show at page load
-            let escaped_logs = html_escape::encode_text(&logs);
+            let escaped_logs = html_escape::encode_text(&trimmed_logs);
 
             // Inject logs into HTML — placeholder {{LOG_CONTENT}} in your HTML file
             html = html.replace("{{LOG_CONTENT}}", &escaped_logs);
