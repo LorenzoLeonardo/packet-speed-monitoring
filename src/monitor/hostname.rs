@@ -156,7 +156,7 @@ impl HostnameManager {
             });
 
         if let (Some(hostname), Some(ip)) = (hostname, ip_assigned) {
-            log::info!("DHCP >> Hostname: {hostname} Assigned IP: {ip}");
+            log::info!("[HostnameManager] DHCP >> Hostname: {hostname} Assigned IP: {ip}");
 
             let mut cache = self.cache.lock().await;
             cache
