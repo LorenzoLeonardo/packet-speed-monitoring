@@ -9,6 +9,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::LOG_FILE;
+
 /// Custom writer that forwards each log line to a broadcast channel
 #[derive(Clone)]
 struct BroadcastWriter {
@@ -76,19 +78,11 @@ pub fn setup_logger() -> broadcast::Sender<String> {
                 | LevelFilter::Error
                 | LevelFilter::Warn
                 | LevelFilter::Debug
-                | LevelFilter::Trace => {
+                | LevelFilter::Trace
+                | LevelFilter::Info => {
                     out.finish(format_args!(
                         "[{}][{}]: {} <{}:{}>",
                         Local::now().format("%b-%d-%Y %H:%M:%S.%f"),
-                        record.level(),
-                        message,
-                        file,
-                        line,
-                    ));
-                }
-                LevelFilter::Info => {
-                    out.finish(format_args!(
-                        "[{}]: {} <{}:{}>",
                         record.level(),
                         message,
                         file,
@@ -109,7 +103,7 @@ pub fn setup_logger() -> broadcast::Sender<String> {
 }
 
 pub struct Log {
-    tx: broadcast::Sender<String>,
+    pub tx: broadcast::Sender<String>,
     shutdown_handle: JoinHandle<()>,
     shutdown_sender: watch::Sender<bool>,
 }
@@ -118,12 +112,11 @@ impl Log {
     pub async fn init() -> anyhow::Result<Self> {
         let tx = setup_logger();
         let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
-
         // Open (or create) the log file asynchronously in append mode
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open("logs.txt")
+            .open(LOG_FILE)
             .await?;
         let mut rx = tx.subscribe();
         // Spawn a background task to write logs into the file
@@ -133,9 +126,7 @@ impl Log {
                     maybe_msg = rx.recv() => {
                         match maybe_msg {
                             Ok(msg) => {
-                                let now = Local::now();
-                                let timestamped_line = format!("[{}] {}\n", now.format("%Y-%m-%d %H:%M:%S%.3f"), msg);
-                                if let Err(e) = file.write_all(timestamped_line.as_bytes()).await {
+                                if let Err(e) = file.write_all(msg.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
                                 }

@@ -4,7 +4,7 @@ use anyhow::Result;
 use ipc_broker::client::IPCClient;
 use tokio::{
     sync::{
-        Notify,
+        Notify, broadcast,
         mpsc::{self, Sender},
         oneshot,
     },
@@ -52,13 +52,19 @@ impl ControlHandler {
 pub struct SystemManager {
     client: IPCClient,
     signal_handle: Arc<Notify>,
+    sse_log_tx: broadcast::Sender<String>,
 }
 
 impl SystemManager {
-    pub fn new(client: IPCClient, signal_handle: Arc<Notify>) -> Self {
+    pub fn new(
+        client: IPCClient,
+        signal_handle: Arc<Notify>,
+        sse_log_tx: broadcast::Sender<String>,
+    ) -> Self {
         Self {
             client,
             signal_handle,
+            sse_log_tx,
         }
     }
 
@@ -73,6 +79,7 @@ impl SystemManager {
             .bind_addr(BIND_ADDR)
             .cert_paths(TLS_CERT, TLS_KEY)
             .add_sender_channel(control_tx.clone())
+            .add_log_channel(self.sse_log_tx.clone())
             .spawn()
             .await?;
 

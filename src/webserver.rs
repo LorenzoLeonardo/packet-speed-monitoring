@@ -42,6 +42,7 @@ struct AppState {
     stopper: WebServerStopper,
     sender_channel: mpsc::Sender<ControlMessage>, // new controller channel
     client_count: Arc<AtomicUsize>,
+    log_tx: broadcast::Sender<String>,
 }
 
 #[derive(Clone)]
@@ -108,6 +109,7 @@ pub struct WebServerBuilder {
     key_path: Option<String>,
     client: IPCClient,
     control: Option<mpsc::Sender<ControlMessage>>,
+    log_tx: Option<broadcast::Sender<String>>,
 }
 
 impl WebServerBuilder {
@@ -118,6 +120,7 @@ impl WebServerBuilder {
             key_path: None,
             client,
             control: None,
+            log_tx: None,
         }
     }
 
@@ -134,6 +137,11 @@ impl WebServerBuilder {
 
     pub fn add_sender_channel(mut self, control: mpsc::Sender<ControlMessage>) -> Self {
         self.control = Some(control);
+        self
+    }
+
+    pub fn add_log_channel(mut self, log: broadcast::Sender<String>) -> Self {
+        self.log_tx = Some(log);
         self
     }
 
@@ -154,11 +162,13 @@ impl WebServerBuilder {
             })
             .await;
 
+        let log_tx = self.log_tx.context("No log sender channel set")?.clone();
         let state = Arc::new(AppState {
             tx,
             stopper: stopper.clone(),
             sender_channel,
             client_count: Arc::new(AtomicUsize::new(0)),
+            log_tx,
         });
         let serve_dir = ServeDir::new("web");
         let app = Router::new()
@@ -168,6 +178,8 @@ impl WebServerBuilder {
             .route("/stop", post(stop_handler))
             .route("/status", get(status_handler))
             .route("/select", post(select_handler))
+            .route("/log", get(log_stream_handler))
+            .route("/log.html", get(log_page_handler))
             .with_state(state)
             .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)))
             .layer(middleware::from_fn(check_paths));
@@ -440,4 +452,97 @@ async fn select_handler(
     broadcast_device_list(state.clone()).await;
 
     Json(json!({ "ok": true }))
+}
+
+async fn log_page_handler() -> impl IntoResponse {
+    Html(
+        r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Real-Time Log Viewer</title>
+    <style>
+        body { background-color: #121212; color: #0f0; font-family: monospace; margin: 0; padding: 10px; }
+        #log-box {
+            white-space: pre-wrap;
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+        h1 { color: #0f0; font-weight: 400; }
+    </style>
+</head>
+<body>
+    <h1>📜 Real-Time Log Output</h1>
+    <div id="log-box"></div>
+
+    <script>
+        const logBox = document.getElementById('log-box');
+        const evtSource = new EventSource('/log');
+
+        evtSource.onmessage = (e) => {
+            logBox.textContent += e.data + "\r\n";
+            logBox.scrollTop = logBox.scrollHeight;
+        };
+
+        evtSource.onerror = (e) => {
+            console.error("SSE connection lost.", e);
+        };
+    </script>
+</body>
+</html>
+"#,
+    )
+}
+
+async fn log_stream_handler(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
+    let mut log_rx = state.log_tx.subscribe();
+    let mut stopper = state.stopper.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                // Handle shutdown signal
+                _ = stopper.shutdown_rx.changed() => {
+                    log::info!("[webserver] SSE stopped by shutdown signal.");
+                    break;
+                }
+
+                // Check if client has gone (receiver dropped)
+                _ = tx.closed() => {
+                    log::info!("[webserver] SSE channel closed (client disconnected early).");
+                    break;
+                }
+
+                // Receive from broadcast channel
+                msg = log_rx.recv() => {
+                    match msg {
+                        Ok(text) => {
+                            if let Err(e) = tx.send(Ok(Event::default().data(text))).await {
+                                log::warn!("[webserver] A client browser has disconnected: {e}");
+                                break; // client disconnected
+                            }
+                        }
+                        Err(RecvError::Lagged(n)) => {
+                            log::warn!("Lagged: {n}");
+                            continue
+                        },
+                        Err(RecvError::Closed) => {
+                            log::error!("[webserver] channel has closed. Bail out!");
+                            break
+                        },
+                    }
+                }
+            }
+        }
+    });
+
+    let stream = ReceiverStream::new(rx_sse);
+    Sse::new(stream)
 }
