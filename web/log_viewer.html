@@ -89,17 +89,29 @@
 
 <body>
     <h1>📜 Real-Time Log Output</h1>
-    <div id="log-box">{{LOG_CONTENT}}<span id="cursor"></span></div>
+    <div id="log-box" style="white-space: pre-wrap; overflow-y: auto; height: 90vh;">
+        {{LOG_CONTENT}}<span id="cursor"></span>
+    </div>
 
     <script>
         const logBox = document.getElementById('log-box');
         const evtSource = new EventSource('/log_event');
 
-        evtSource.onmessage = (e) => {
-            logBox.textContent = logBox.textContent.replace(/▊$/, ''); // remove cursor before append
-            logBox.textContent += e.data + "\n";
+        // Scroll to bottom after the initial HTML content is loaded
+        window.addEventListener('load', () => {
             logBox.scrollTop = logBox.scrollHeight;
-            logBox.textContent += "▊"; // re-add cursor
+        });
+
+        evtSource.onmessage = (e) => {
+            // Remove existing cursor before appending new log line
+            logBox.textContent = logBox.textContent.replace(/▊$/, '');
+            logBox.textContent += e.data + "\n";
+
+            // Auto-scroll to bottom on new log
+            logBox.scrollTop = logBox.scrollHeight;
+
+            // Re-add cursor
+            logBox.textContent += "▊";
         };
 
         evtSource.onerror = (e) => {
