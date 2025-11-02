@@ -178,8 +178,8 @@ impl WebServerBuilder {
             .route("/stop", post(stop_handler))
             .route("/status", get(status_handler))
             .route("/select", post(select_handler))
-            .route("/log", get(log_stream_handler))
-            .route("/log.html", get(log_page_handler))
+            .route("/log_event", get(log_stream_handler))
+            .route("/view_logs", get(log_page_handler))
             .with_state(state)
             .fallback_service(service_fn(move |req| serve_dir.clone().oneshot(req)))
             .layer(middleware::from_fn(check_paths));
