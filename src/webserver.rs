@@ -316,7 +316,7 @@ async fn sse_handler(
     let state_clone = state.clone(); // <-- clone to decrement later
 
     // Spawn a background task that forwards both the initial event and broadcast updates
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         if let Err(e) = tx.send(Ok(Event::default().data(init_event))).await {
             log::error!("{e}");
             return;
@@ -360,7 +360,10 @@ async fn sse_handler(
         let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
         log::info!("[webserver] Client disconnected. Remaining clients: {remaining}");
     });
-
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GiveWebSSEHandle(handle))
+        .await;
     // Convert the mpsc receiver into an SSE-compatible stream
     let stream = ReceiverStream::new(rx_sse);
     Sse::new(stream)
