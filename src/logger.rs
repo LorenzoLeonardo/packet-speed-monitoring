@@ -126,7 +126,7 @@ impl Log {
                     maybe_msg = rx.recv() => {
                         match maybe_msg {
                             Ok(mut msg) => {
-                                msg.push_str("\n");
+                                msg.push('\n');
                                 if let Err(e) = file.write_all(msg.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
@@ -150,7 +150,7 @@ impl Log {
                         if *shutdown_receiver.borrow() {
                             // Drain remaining messages before exiting
                             while let Ok(mut msg) = rx.try_recv() {
-                                msg.push_str("\n");
+                                msg.push('\n');
                                 if let Err(e) = file.write_all(msg.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
