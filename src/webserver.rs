@@ -482,22 +482,9 @@ async fn log_stream_handler(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
     let mut log_rx = state.log_tx.subscribe();
-    let mut stopper = state.stopper.clone();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // Handle shutdown signal
-                _ = stopper.shutdown_rx.changed() => {
-                    log::info!("[webserver] SSE stopped by shutdown signal.");
-                    break;
-                }
-
-                // Check if client has gone (receiver dropped)
-                _ = tx.closed() => {
-                    log::info!("[webserver] SSE channel closed (client disconnected early).");
-                    break;
-                }
-
                 // Receive from broadcast channel
                 msg = log_rx.recv() => {
                     match msg {
@@ -520,7 +507,10 @@ async fn log_stream_handler(
             }
         }
     });
-
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GiveLogSSEHandle(handle))
+        .await;
     let stream = ReceiverStream::new(rx_sse);
     Sse::new(stream)
 }
