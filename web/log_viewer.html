@@ -36,7 +36,7 @@
 
     <script>
         const logBox = document.getElementById('log-box');
-        const evtSource = new EventSource('/log');
+        const evtSource = new EventSource('/log_event');
 
         evtSource.onmessage = (e) => {
             logBox.textContent += e.data + "\n";
