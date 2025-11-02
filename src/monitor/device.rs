@@ -12,6 +12,7 @@ pub struct DeviceInfo {
     pub desc: String,
     pub device_ip: Ipv4Addr,
     pub network_ip: Ipv4Addr,
+    pub broadcast_ip: Ipv4Addr,
     pub netmask: Ipv4Addr,
 }
 
@@ -38,12 +39,12 @@ impl TryFrom<&Device> for DeviceInfo {
                 && let IpAddr::V4(device_ip) = address.addr
                 && let IpAddr::V4(netmask) = address.netmask.context("Subnet mask not found")?
             {
-                let network_ip = helpers::network_address(device_ip, netmask);
                 return Ok(Self {
                     name: device.name.clone(),
                     desc: device.desc.clone().unwrap_or_default(),
                     device_ip,
-                    network_ip,
+                    network_ip: helpers::network_address(device_ip, netmask),
+                    broadcast_ip: helpers::broadcast_address(device_ip, netmask),
                     netmask,
                 });
             }
@@ -75,6 +76,7 @@ impl DeviceInfo {
         log::info!("    ↳ Description: {:?}", physical.desc);
         log::info!("    ↳ Device Address: {}", physical.device_ip);
         log::info!("    ↳ Network Address: {}", physical.network_ip);
+        log::info!("    ↳ Broadcast Address: {}", physical.broadcast_ip);
         log::info!("    ↳ Subnet Mask: {}", physical.netmask);
         Some(physical)
     }

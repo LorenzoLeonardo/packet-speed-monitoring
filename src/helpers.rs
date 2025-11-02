@@ -37,6 +37,15 @@ pub(crate) fn network_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
     Ipv4Addr::from(u32::from(ip) & u32::from(mask))
 }
 
+/// Compute the broadcast address from IP and mask
+pub(crate) fn broadcast_address(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
+    let ip_u32 = u32::from(ip);
+    let mask_u32 = u32::from(mask);
+    let network_u32 = ip_u32 & mask_u32;
+    let broadcast_u32 = network_u32 | !mask_u32;
+    Ipv4Addr::from(broadcast_u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
