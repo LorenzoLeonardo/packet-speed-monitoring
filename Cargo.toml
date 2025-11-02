@@ -16,6 +16,7 @@ dhcproto = { version = "0.14", features = ["serde"] }
 etherparse = "0.19"
 fern = "0.7"
 hex = "0.4"
+html-escape = "0.2"
 ipc-broker = "1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }

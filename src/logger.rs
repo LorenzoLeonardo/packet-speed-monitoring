@@ -125,7 +125,8 @@ impl Log {
                 tokio::select! {
                     maybe_msg = rx.recv() => {
                         match maybe_msg {
-                            Ok(msg) => {
+                            Ok(mut msg) => {
+                                msg.push_str("\n");
                                 if let Err(e) = file.write_all(msg.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
@@ -148,10 +149,9 @@ impl Log {
                         // Shutdown signal received
                         if *shutdown_receiver.borrow() {
                             // Drain remaining messages before exiting
-                            while let Ok(msg) = rx.try_recv() {
-                                let now = Local::now();
-                                let timestamped_line = format!("[{}] {}\n", now.format("%Y-%m-%d %H:%M:%S%.3f"), msg);
-                                if let Err(e) = file.write_all(timestamped_line.as_bytes()).await {
+                            while let Ok(mut msg) = rx.try_recv() {
+                                msg.push_str("\n");
+                                if let Err(e) = file.write_all(msg.as_bytes()).await {
                                     eprintln!("Failed to write log to file: {}", e);
                                     break;
                                 }
