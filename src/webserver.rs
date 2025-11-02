@@ -267,108 +267,6 @@ async fn index_handler() -> axum::response::Response {
     Html(contents).into_response()
 }
 
-async fn sse_handler(
-    State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let client_id = state.client_count.fetch_add(1, Ordering::SeqCst) + 1;
-    log::info!("[webserver] A client browser has connected. Total clients: {client_id}");
-    // Each new client gets its own receiver
-    let mut rx = state.tx.subscribe();
-    let mut stopper = state.stopper.clone();
-
-    // Query current status
-    let (status_tx, status_rx) = oneshot::channel();
-    let _ = state
-        .sender_channel
-        .send(ControlMessage::GetStatus(status_tx))
-        .await;
-    let current_status = status_rx.await.unwrap_or(false);
-
-    // Query device list
-    let (devinfo_tx, devinfo_rx) = oneshot::channel();
-    let _ = state
-        .sender_channel
-        .send(ControlMessage::GetDeviceInfo(devinfo_tx))
-        .await;
-    let dev_info = devinfo_rx.await.unwrap_or(Vec::new());
-
-    // Query selected device
-    let (selected_tx, selected_rx) = oneshot::channel();
-    let _ = state
-        .sender_channel
-        .send(ControlMessage::GetSelectedDevice(selected_tx))
-        .await;
-    let selected = selected_rx.await.unwrap_or(None);
-
-    // Send a single "init" message with status, devices, and selected
-    let init_event = json!({
-        "type": "init",
-        "status": {
-            "running": current_status
-        },
-        "devices": dev_info,
-        "selected": selected
-    })
-    .to_string();
-
-    // Create an mpsc channel for pushing SSE events manually
-    let (tx, rx_sse) = mpsc::channel::<Result<Event, Infallible>>(16);
-    let state_clone = state.clone(); // <-- clone to decrement later
-
-    // Spawn a background task that forwards both the initial event and broadcast updates
-    let handle = tokio::spawn(async move {
-        if let Err(e) = tx.send(Ok(Event::default().data(init_event))).await {
-            log::error!("{e}");
-            return;
-        }
-
-        loop {
-            tokio::select! {
-                // Handle shutdown signal
-                _ = stopper.shutdown_rx.changed() => {
-                    log::info!("[webserver] SSE stopped by shutdown signal.");
-                    break;
-                }
-
-                // Check if client has gone (receiver dropped)
-                _ = tx.closed() => {
-                    log::info!("[webserver] SSE channel closed (client disconnected early).");
-                    break;
-                }
-
-                // Receive from broadcast channel
-                msg = rx.recv() => {
-                    match msg {
-                        Ok(text) => {
-                            if let Err(e) = tx.send(Ok(Event::default().data(text))).await {
-                                log::warn!("[webserver] A client browser has disconnected: {e}");
-                                break; // client disconnected
-                            }
-                        }
-                        Err(RecvError::Lagged(n)) => {
-                            log::warn!("Lagged: {n}");
-                            continue
-                        },
-                        Err(RecvError::Closed) => {
-                            log::error!("[webserver] channel has closed. Bail out!");
-                            break
-                        },
-                    }
-                }
-            }
-        }
-        let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
-        log::info!("[webserver] Client disconnected. Remaining clients: {remaining}");
-    });
-    let _ = state
-        .sender_channel
-        .send(ControlMessage::GiveWebSSEHandle(handle))
-        .await;
-    // Convert the mpsc receiver into an SSE-compatible stream
-    let stream = ReceiverStream::new(rx_sse);
-    Sse::new(stream)
-}
-
 async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let _ = state.sender_channel.send(ControlMessage::Start).await;
     broadcast_status(&state.tx, true).await; // <-- broadcast to all clients
@@ -480,35 +378,127 @@ async fn log_page_handler() -> impl IntoResponse {
     }
 }
 
-async fn log_stream_handler(
-    State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
-    let mut log_rx = state.log_tx.subscribe();
-    let handle = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                // Receive from broadcast channel
-                msg = log_rx.recv() => {
-                    match msg {
-                        Ok(text) => {
-                            if let Err(e) = tx.send(Ok(Event::default().data(text))).await {
-                                log::warn!("[webserver] A client browser has disconnected: {e}");
-                                break; // client disconnected
-                            }
+async fn forward_broadcast_to_sse(
+    mut rx: broadcast::Receiver<String>,
+    mut stopper: Option<watch::Receiver<bool>>,
+    tx: mpsc::Sender<Result<Event, Infallible>>,
+    context: &'static str, // e.g. "SSE" or "Log"
+) {
+    loop {
+        tokio::select! {
+            // Handle shutdown (if provided)
+            _ = async {
+                if let Some(s) = stopper.as_mut() {
+                    let _ = s.changed().await;
+                }
+            }, if stopper.is_some() => {
+                log::info!("[webserver] {context} stopped by shutdown signal.");
+                break;
+            }
+
+            // Client disconnected (mpsc receiver dropped)
+            _ = tx.closed() => {
+                log::info!("[webserver] {context} channel closed (client disconnected early).");
+                break;
+            }
+
+            // Receive from broadcast channel
+            msg = rx.recv() => {
+                match msg {
+                    Ok(text) => {
+                        if let Err(e) = tx.send(Ok(Event::default().data(text))).await {
+                            log::warn!("[webserver] {context}: client disconnected: {e}");
+                            break;
                         }
-                        Err(RecvError::Lagged(n)) => {
-                            log::warn!("Lagged: {n}");
-                            continue
-                        },
-                        Err(RecvError::Closed) => {
-                            log::error!("[webserver] channel has closed. Bail out!");
-                            break
-                        },
+                    }
+                    Err(RecvError::Lagged(n)) => {
+                        log::warn!("[webserver] {context} lagged {n} messages behind.");
+                        continue;
+                    }
+                    Err(RecvError::Closed) => {
+                        log::error!("[webserver] {context} broadcast channel closed.");
+                        break;
                     }
                 }
             }
         }
+    }
+}
+
+async fn sse_handler(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let client_id = state.client_count.fetch_add(1, Ordering::SeqCst) + 1;
+    log::info!("[webserver] A client browser has connected. Total clients: {client_id}");
+    // Each new client gets its own receiver
+    let rx = state.tx.subscribe();
+    let stopper = state.stopper.clone();
+
+    // Query current status
+    let (status_tx, status_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetStatus(status_tx))
+        .await;
+    let current_status = status_rx.await.unwrap_or(false);
+
+    // Query device list
+    let (devinfo_tx, devinfo_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetDeviceInfo(devinfo_tx))
+        .await;
+    let dev_info = devinfo_rx.await.unwrap_or(Vec::new());
+
+    // Query selected device
+    let (selected_tx, selected_rx) = oneshot::channel();
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GetSelectedDevice(selected_tx))
+        .await;
+    let selected = selected_rx.await.unwrap_or(None);
+
+    // Send a single "init" message with status, devices, and selected
+    let init_event = json!({
+        "type": "init",
+        "status": {
+            "running": current_status
+        },
+        "devices": dev_info,
+        "selected": selected
+    })
+    .to_string();
+
+    // Create an mpsc channel for pushing SSE events manually
+    let (tx, rx_sse) = mpsc::channel::<Result<Event, Infallible>>(16);
+    let state_clone = state.clone(); // <-- clone to decrement later
+
+    // Spawn a background task that forwards both the initial event and broadcast updates
+    let handle = tokio::spawn(async move {
+        if let Err(e) = tx.send(Ok(Event::default().data(init_event))).await {
+            log::error!("{e}");
+            return;
+        }
+        forward_broadcast_to_sse(rx, Some(stopper.shutdown_rx.clone()), tx, "SSE").await;
+        let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
+        log::info!("[webserver] Client disconnected. Remaining clients: {remaining}");
+    });
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::GiveWebSSEHandle(handle))
+        .await;
+    // Convert the mpsc receiver into an SSE-compatible stream
+    let stream = ReceiverStream::new(rx_sse);
+    Sse::new(stream)
+}
+
+async fn log_stream_handler(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
+    let log_rx = state.log_tx.subscribe();
+    let handle = tokio::spawn(async move {
+        forward_broadcast_to_sse(log_rx, None, tx, "Log").await;
     });
     let _ = state
         .sender_channel
