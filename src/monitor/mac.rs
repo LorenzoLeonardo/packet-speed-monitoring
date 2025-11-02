@@ -121,7 +121,7 @@ impl MacManager {
             let mut file = fs::File::create(path).await?;
             file.write_all(new_json.as_bytes()).await?;
             file.flush().await?;
-            log::info!("MAC cache updated ({} entries).", entries.len());
+            log::debug!("MAC cache updated ({} entries).", entries.len());
         }
 
         Ok(())
