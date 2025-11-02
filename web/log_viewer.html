@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Real-Time Log Viewer</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #0f0;
+            font-family: monospace;
+            margin: 0;
+            padding: 10px;
+        }
+
+        #log-box {
+            white-space: pre-wrap;
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+
+        h1 {
+            color: #0f0;
+            font-weight: 400;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>📜 Real-Time Log Output</h1>
+    <div id="log-box">{{LOG_CONTENT}}</div>
+
+    <script>
+        const logBox = document.getElementById('log-box');
+        const evtSource = new EventSource('/log');
+
+        evtSource.onmessage = (e) => {
+            logBox.textContent += e.data + "\n";
+            logBox.scrollTop = logBox.scrollHeight;
+        };
+
+        evtSource.onerror = (e) => {
+            console.error("SSE connection lost.", e);
+        };
+    </script>
+</body>
+
+</html>

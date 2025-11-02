@@ -34,7 +34,7 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tower::{ServiceExt, service_fn};
 use tower_http::services::ServeDir;
 
-use crate::{BIND_ADDR, manager::ControlMessage, monitor::device::DeviceInfo};
+use crate::{BIND_ADDR, LOG_FILE, manager::ControlMessage, monitor::device::DeviceInfo};
 
 #[derive(Clone)]
 struct AppState {
@@ -455,48 +455,26 @@ async fn select_handler(
 }
 
 async fn log_page_handler() -> impl IntoResponse {
-    Html(
-        r#"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Real-Time Log Viewer</title>
-    <style>
-        body { background-color: #121212; color: #0f0; font-family: monospace; margin: 0; padding: 10px; }
-        #log-box {
-            white-space: pre-wrap;
-            background: #000;
-            padding: 10px;
-            border-radius: 8px;
-            height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    // Load the HTML template
+    let html_result = tokio::fs::read_to_string("web/log_viewer.html").await;
+    let log_result = tokio::fs::read_to_string(LOG_FILE).await; // Your log file
+
+    match (html_result, log_result) {
+        (Ok(mut html), Ok(logs)) => {
+            // Safely embed the log contents into a <script> tag so they show at page load
+            let escaped_logs = html_escape::encode_text(&logs);
+
+            // Inject logs into HTML — placeholder {{LOG_CONTENT}} in your HTML file
+            html = html.replace("{{LOG_CONTENT}}", &escaped_logs);
+
+            Html(html)
         }
-        h1 { color: #0f0; font-weight: 400; }
-    </style>
-</head>
-<body>
-    <h1>📜 Real-Time Log Output</h1>
-    <div id="log-box"></div>
-
-    <script>
-        const logBox = document.getElementById('log-box');
-        const evtSource = new EventSource('/log');
-
-        evtSource.onmessage = (e) => {
-            logBox.textContent += e.data + "\r\n";
-            logBox.scrollTop = logBox.scrollHeight;
-        };
-
-        evtSource.onerror = (e) => {
-            console.error("SSE connection lost.", e);
-        };
-    </script>
-</body>
-</html>
-"#,
-    )
+        (Ok(html), Err(_)) => {
+            // If log file missing, just show empty
+            Html(html.replace("{{LOG_CONTENT}}", ""))
+        }
+        (Err(e), _) => Html(format!("<h1>Error loading log viewer: {}</h1>", e)),
+    }
 }
 
 async fn log_stream_handler(
