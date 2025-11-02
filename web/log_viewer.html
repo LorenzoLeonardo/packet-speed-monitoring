@@ -56,22 +56,18 @@
         /* === Log Level Colors (ANSI-like) === */
         .log-debug {
             color: #5f87ff;
-            /* Blue */
         }
 
         .log-info {
             color: #bfbfbf;
-            /* Default gray */
         }
 
         .log-warning {
             color: #ffd75f;
-            /* Yellow-ish */
         }
 
         .log-error {
             color: #ff5f5f;
-            /* Red */
         }
 
         .log-critical {
@@ -81,7 +77,6 @@
 
         .log-success {
             color: #5fff5f;
-            /* Green */
         }
 
         /* Cursor effect */
@@ -111,21 +106,63 @@
         const logBox = document.getElementById('log-box');
         const evtSource = new EventSource('/log_event');
 
-        // Scroll to bottom after the initial HTML content is loaded
-        window.addEventListener('load', () => {
+        function getLogClass(line) {
+            if (/\b(ERROR|ERR)\b/i.test(line)) return "log-error";
+            if (/\b(WARN|WARNING)\b/i.test(line)) return "log-warning";
+            if (/\b(DEBUG)\b/i.test(line)) return "log-debug";
+            if (/\b(CRITICAL|FATAL)\b/i.test(line)) return "log-critical";
+            if (/\b(OK|SUCCESS|DONE)\b/i.test(line)) return "log-success";
+            if (/\b(INFO)\b/i.test(line)) return "log-info";
+            return "";
+        }
+
+        function applyColorToExistingLogs() {
+            // Get the raw innerText from the server-rendered log
+            const rawText = logBox.innerText.replace(/▊$/, '');
+            const lines = rawText.split(/\r?\n/);
+
+            // Clear the box
+            logBox.innerHTML = "";
+
+            // Re-insert each line with proper color
+            lines.forEach(line => {
+                if (line.trim() === "") return;
+                const span = document.createElement("span");
+                const logClass = getLogClass(line);
+                if (logClass) span.classList.add(logClass);
+                span.textContent = line + "\n";
+                logBox.appendChild(span);
+            });
+
+            // Re-attach blinking cursor
+            const cursor = document.createElement("span");
+            cursor.id = "cursor";
+            logBox.appendChild(cursor);
+
+            // Scroll to bottom
             logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        window.addEventListener('load', () => {
+            applyColorToExistingLogs();
         });
 
         evtSource.onmessage = (e) => {
-            // Remove existing cursor before appending new log line
-            logBox.textContent = logBox.textContent.replace(/▊$/, '');
-            logBox.textContent += e.data + "\n";
+            const cursor = document.getElementById("cursor");
+            if (cursor) cursor.remove();
 
-            // Auto-scroll to bottom on new log
+            const line = e.data;
+            const span = document.createElement("span");
+            const logClass = getLogClass(line);
+            if (logClass) span.classList.add(logClass);
+            span.textContent = line + "\n";
+            logBox.appendChild(span);
+
             logBox.scrollTop = logBox.scrollHeight;
 
-            // Re-add cursor
-            logBox.textContent += "▊";
+            const newCursor = document.createElement("span");
+            newCursor.id = "cursor";
+            logBox.appendChild(newCursor);
         };
 
         evtSource.onerror = (e) => {
