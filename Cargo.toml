@@ -1,6 +1,6 @@
 [package]
 name = "packet-speed-monitoring"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2024"
 build = "build.rs"
 authors = ["Lorenzo Leonardo <enzotechcomputersolutions@gmail.com>"]
@@ -15,7 +15,7 @@ chrono = "0.4"
 dhcproto = { version = "0.14", features = ["serde"] }
 etherparse = "0.19"
 fern = "0.7"
-hex = "0.4.3"
+hex = "0.4"
 ipc-broker = "1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
