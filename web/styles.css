@@ -301,3 +301,18 @@ footer {
 .selected-device {
   background-color: yellow !important;
 }
+
+.log-button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.log-button:hover {
+  background-color: #0056b3;
+}
