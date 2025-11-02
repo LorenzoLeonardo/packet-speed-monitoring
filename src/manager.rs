@@ -26,6 +26,7 @@ pub enum ControlMessage {
     SelectDevice(DeviceInfo),
     GetSelectedDevice(oneshot::Sender<Option<DeviceInfo>>),
     GiveLogSSEHandle(JoinHandle<()>),
+    GiveWebSSEHandle(JoinHandle<()>),
     Quit,
 }
 
@@ -89,6 +90,7 @@ impl SystemManager {
             let mut packet_monitor: Option<PacketMonitor> = None;
             let mut selected_device: Option<DeviceInfo> = None;
             let mut sse_log_handle: Option<JoinHandle<()>> = None;
+            let mut sse_web_handle: Option<JoinHandle<()>> = None;
             log::info!("[manager] SystemManager has started.");
             while let Some(msg) = control_rx.recv().await {
                 let client = client.clone();
@@ -136,14 +138,23 @@ impl SystemManager {
                     ControlMessage::GiveLogSSEHandle(handle) => {
                         sse_log_handle = Some(handle);
                     }
+                    ControlMessage::GiveWebSSEHandle(handle) => {
+                        sse_web_handle = Some(handle);
+                    }
                     ControlMessage::Quit => {
                         log::info!("[manager] SystemManager is exiting...");
                         if let Some(pm) = packet_monitor.take() {
                             pm.stop();
                             let _ = pm.handle.await;
                         }
+
                         web_handler.stop();
-                        let _ = web_handler.handle.await;
+
+                        if let Some(sse_web_handle) = sse_web_handle.take() {
+                            let _ = tokio::join!(web_handler.handle, sse_web_handle);
+                        } else {
+                            let _ = web_handler.handle.await;
+                        }
                         break;
                     }
                 }
