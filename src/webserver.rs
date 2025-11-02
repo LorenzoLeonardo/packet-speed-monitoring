@@ -479,7 +479,7 @@ async fn sse_handler(
             log::error!("{e}");
             return;
         }
-        forward_broadcast_to_sse(rx, Some(stopper.shutdown_rx.clone()), tx, "SSE").await;
+        forward_broadcast_to_sse(rx, Some(stopper.shutdown_rx.clone()), tx, "Web SSE").await;
         let remaining = state_clone.client_count.fetch_sub(1, Ordering::SeqCst) - 1;
         log::info!("[webserver] Client disconnected. Remaining clients: {remaining}");
     });
@@ -498,7 +498,7 @@ async fn log_stream_handler(
     let (tx, rx_sse) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
     let log_rx = state.log_tx.subscribe();
     let handle = tokio::spawn(async move {
-        forward_broadcast_to_sse(log_rx, None, tx, "Log").await;
+        forward_broadcast_to_sse(log_rx, None, tx, "Log SSE").await;
     });
     let _ = state
         .sender_channel
