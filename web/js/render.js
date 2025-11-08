@@ -38,24 +38,27 @@ export function renderRow(ip, curr, max) {
   `;
 
     const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
+    const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
+
+    // 🔹 If device is inactive → hide/remove it
+    if (isInactive) {
+        if (existingRow) existingRow.remove();
+        return;
+    }
+
     if (existingRow) {
         existingRow.innerHTML = rowHTML;
-
-        const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
-        existingRow.classList.toggle("inactive-row", isInactive);
-
-        const isServer = curr.ip === getSelectedDeviceIp();
-        existingRow.classList.toggle("selected-device", isServer);
     } else {
         const row = document.createElement("tr");
         row.dataset.ip = ip;
         row.innerHTML = rowHTML;
         tbody.appendChild(row);
-        const isInactive = typeof curr.mac === "string" && curr.mac.trim().toLowerCase() === "not active";
-        row.classList.toggle("inactive-row", isInactive);
-        const isServer = curr.ip === getSelectedDeviceIp();
-        row.classList.toggle("selected-device", isServer);
     }
+
+    const row = existingRow || document.querySelector(`tr[data-ip="${ip}"]`);
+    const isServer = curr.ip === getSelectedDeviceIp();
+
+    row.classList.toggle("selected-device", isServer);
 }
 
 export function rerenderAllRows() {
