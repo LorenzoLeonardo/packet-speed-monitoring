@@ -24,6 +24,7 @@ export function renderRow(ip, curr, max) {
     const dateMaxUpUTC = max.time_utc_up ? new Date(max.time_utc_up) : null;
 
     const rowHTML = `
+    <td class="row-no"></td>
     <td>${ip}</td>
     <td>${curr.hostname}</td>
     <td>${curr.mac}</td>
@@ -66,10 +67,20 @@ export function rerenderAllRows() {
         renderRow(ip, data.current, data.max);
     }
     sortTable();
+    updateRowNumbers();
 }
 
 export function sortTable() {
     const rows = Array.from(tbody.querySelectorAll("tr"));
     rows.sort((a, b) => a.dataset.ip.localeCompare(b.dataset.ip, undefined, { numeric: true }));
     rows.forEach(row => tbody.appendChild(row));
+    updateRowNumbers();
+}
+
+function updateRowNumbers() {
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+    rows.forEach((row, index) => {
+        const noCell = row.querySelector(".row-no");
+        if (noCell) noCell.textContent = index + 1;
+    });
 }
