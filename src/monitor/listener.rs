@@ -3,7 +3,6 @@ use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::{AsyncCapture, AsyncCaptureHandle, Capture, Device, Error, Packet};
 use etherparse::Ipv4HeaderSlice;
 use tokio::sync::mpsc::UnboundedSender;
@@ -39,8 +38,7 @@ impl PacketListenerBuilder {
 
     /// Create a default DNS resolver if not provided
     pub async fn init_hostname_manager(mut self) -> Self {
-        self.hostname_mgr =
-            Some(HostnameManager::load_or_new(AsyncDnsResolver::new(), HOSTNAME_CACHE_FILE).await);
+        self.hostname_mgr = Some(HostnameManager::load_or_new(HOSTNAME_CACHE_FILE).await);
         self
     }
 
@@ -184,8 +182,6 @@ async fn broadcast_stats(
         let up_mbps = (s.upload_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
         let down_mbps =
             (s.download_bytes() as f64 * 8.0) / (1_000_000.0 * elapsed_secs.as_secs_f64());
-
-        hostname_mgr.update_from_dns(ip).await;
 
         let hostname = hostname_mgr.get_hostname(ip).await;
         let mac = mac_mgr

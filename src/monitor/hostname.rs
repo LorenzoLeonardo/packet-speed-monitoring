@@ -1,6 +1,5 @@
 use std::{collections::HashMap, net::Ipv4Addr, path::Path, sync::Arc};
 
-use async_dns_lookup::AsyncDnsResolver;
 use async_pcap::Packet;
 use dhcproto::{
     Decodable,
@@ -17,14 +16,12 @@ struct HostEntry {
 }
 
 pub struct HostnameManager {
-    dns: AsyncDnsResolver,
     cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
 }
 
 impl HostnameManager {
-    pub fn new(dns: AsyncDnsResolver) -> Self {
+    pub fn new() -> Self {
         Self {
-            dns,
             cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -35,55 +32,6 @@ impl HostnameManager {
             .get(ip)
             .cloned()
             .unwrap_or_else(|| ip.to_string())
-    }
-
-    pub async fn update_from_dns(&self, ip: &Ipv4Addr) {
-        let hostname = {
-            let cache_guard = self.cache.lock().await;
-            cache_guard
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| ip.to_string())
-        };
-
-        if hostname == ip.to_string() {
-            let cache = self.cache.clone();
-            let ip_copy = *ip;
-            let dns_clone = self.dns.clone();
-            tokio::spawn(async move {
-                let _ = Self::get_or_resolve_hostname(dns_clone, ip_copy, cache).await;
-            });
-        }
-    }
-
-    async fn get_or_resolve_hostname(
-        dns: AsyncDnsResolver,
-        ip: Ipv4Addr,
-        cache: Arc<Mutex<HashMap<Ipv4Addr, String>>>,
-    ) -> String {
-        {
-            let cache_guard = cache.lock().await;
-            if let Some(name) = cache_guard.get(&ip) {
-                return name.clone();
-            }
-        }
-
-        let resolved = dns.reverse_lookup(ip).await;
-
-        let hostname = match resolved {
-            Ok(name) => {
-                log::debug!("Resolved {ip} -> {name}");
-                name
-            }
-            Err(_) => {
-                log::warn!("No reverse DNS for {ip}");
-                ip.to_string()
-            }
-        };
-
-        let mut cache_guard = cache.lock().await;
-        cache_guard.insert(ip, hostname.clone());
-        hostname
     }
 
     /// Parse and track DHCP messages.
@@ -176,12 +124,12 @@ impl HostnameManager {
     }
 
     /// Try to load hostname cache from file, or start empty if failed.
-    pub async fn load_or_new<P: AsRef<Path>>(dns: AsyncDnsResolver, path: P) -> Self {
-        match Self::load_from_file(dns.clone(), &path).await {
+    pub async fn load_or_new<P: AsRef<Path>>(path: P) -> Self {
+        match Self::load_from_file(&path).await {
             Ok(manager) => manager,
             Err(e) => {
                 log::warn!("Failed to load hostname cache: {e}. Starting fresh.");
-                Self::new(dns)
+                Self::new()
             }
         }
     }
@@ -212,10 +160,7 @@ impl HostnameManager {
     }
 
     /// Load hostname cache from JSON file.
-    async fn load_from_file<P: AsRef<Path>>(
-        dns: AsyncDnsResolver,
-        path: P,
-    ) -> std::io::Result<Self> {
+    async fn load_from_file<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let data = fs::read_to_string(path).await?;
         let entries: Vec<HostEntry> = serde_json::from_str(&data).unwrap_or_default();
 
@@ -223,7 +168,6 @@ impl HostnameManager {
             entries.into_iter().map(|e| (e.ip, e.hostname)).collect();
 
         Ok(Self {
-            dns,
             cache: Arc::new(Mutex::new(cache)),
         })
     }

@@ -7,7 +7,6 @@ authors = ["Lorenzo Leonardo <enzotechcomputersolutions@gmail.com>"]
 
 [dependencies]
 anyhow = "1.0"
-async-dns-lookup = "0.1"
 async-pcap = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
