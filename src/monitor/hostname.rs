@@ -107,19 +107,30 @@ impl HostnameManager {
             log::info!("[HostnameManager] DHCP >> Hostname: {hostname} Assigned IP: {ip}");
 
             let mut cache = self.cache.lock().await;
-            cache
-                .entry(ip)
-                .and_modify(|existing| {
-                    // Only update if existing hostname is an IP (numeric)
-                    if existing.parse::<Ipv4Addr>().is_ok() {
-                        *existing = hostname.clone();
-                        log::info!("Updated cached hostname for {ip} -> {hostname}");
-                    }
-                })
-                .or_insert_with(|| {
+
+            // Remove old IP entry for this hostname if it exists
+            if let Some((old_ip, _)) = cache
+                .iter()
+                .find(|(_, existing_name)| **existing_name == hostname)
+                .map(|(k, v)| (*k, v.clone()))
+                && old_ip != ip
+            {
+                cache.remove(&old_ip);
+                log::info!("Removed old mapping {old_ip} -> {hostname}");
+            }
+
+            // Update or insert hostname for the new IP
+            match cache.get(&ip) {
+                Some(existing) if *existing != hostname => {
+                    cache.insert(ip, hostname.clone());
+                    log::info!("Updated hostname for {ip} -> {hostname}");
+                }
+                None => {
+                    cache.insert(ip, hostname.clone());
                     log::info!("Inserted new hostname for {ip} -> {hostname}");
-                    hostname.clone()
-                });
+                }
+                _ => {} // No change needed
+            }
         }
     }
 
