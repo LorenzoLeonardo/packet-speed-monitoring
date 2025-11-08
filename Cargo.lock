@@ -39,17 +39,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "async-dns-lookup"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1503d6439e1af0dd98bd1c343bbd9d5e582c4964d5dfbf29bf844df518c28979"
-dependencies = [
- "dns-lookup",
- "log",
- "tokio",
-]
-
-[[package]]
 name = "async-pcap"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -455,18 +444,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.108",
-]
-
-[[package]]
-name = "dns-lookup"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
-dependencies = [
- "cfg-if",
- "libc",
- "socket2",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1232,7 +1209,6 @@ name = "packet-speed-monitoring"
 version = "0.2.13"
 dependencies = [
  "anyhow",
- "async-dns-lookup",
  "async-pcap",
  "axum",
  "axum-server",
