@@ -18,13 +18,20 @@
       <!-- Controls Section -->
       <section class="controls-section">
         <h2>Select Timezone</h2>
-        <select id="tz-select"></select>
-        <button id="start-btn" class="btn btn-start">Start Listener</button>
-        <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
+        <div>
+          <select id="tz-select"></select>
+        </div>
+        <div>
+          <label for="ms-input">Polling (milliseconds):</label>
+          <input type="number" id="ms-input" min="0" step="1" placeholder="Enter ms" style="width: 120px; padding: 4px;"
+            min="100" max="5000" value="1000" />
+          <button id="start-btn" class="btn btn-start">Start Listener</button>
+          <button id="stop-btn" class="btn btn-stop">Stop Listener</button>
 
-        <button class="log-button" onclick="window.open('/view_logs', '_blank')">
-          🔍 View Streaming Log
-        </button>
+          <button class="log-button" onclick="window.open('/view_logs', '_blank')">
+            🔍 View Streaming Log
+          </button>
+        </div>
       </section>
 
       <!-- New Device Info Table -->
