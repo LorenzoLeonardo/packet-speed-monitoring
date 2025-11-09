@@ -1,9 +1,11 @@
 pub mod device;
 mod hostname;
-mod listener;
+pub mod listener;
 mod mac;
 mod publisher;
 mod speed_info;
+
+use std::time::Duration;
 
 use anyhow::Result;
 use async_pcap::AsyncCaptureHandle;
@@ -21,7 +23,11 @@ pub struct PacketMonitor {
 }
 
 impl PacketMonitor {
-    pub async fn start(client: IPCClient, device_info: DeviceInfo) -> Result<Self> {
+    pub async fn start(
+        client: IPCClient,
+        device_info: DeviceInfo,
+        poll_delay: Duration,
+    ) -> Result<Self> {
         let (broadcaster_tx, broadcaster_rx) = unbounded_channel();
         // Spawn the packet listener and transmit the BroadcastData into the Publisher
         let (packet_listener_handle, async_capture_handle) =
@@ -29,7 +35,7 @@ impl PacketMonitor {
                 .init_hostname_manager()
                 .await
                 .transmitter_broadcast_data_channel(broadcaster_tx)
-                .spawn()
+                .spawn(poll_delay)
                 .await?;
 
         // Spawn the a publisher to receive the BroadcastData from the packet listener
