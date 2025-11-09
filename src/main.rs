@@ -36,7 +36,6 @@ async fn run_app(sse_log_tx: broadcast::Sender<String>) -> Result<()> {
         .spawn()
         .await?;
 
-    handle.start().await;
     // wait here until signal is sent
     signal::wait_until_signal(manual_trigger).await;
     handle.stop().await;

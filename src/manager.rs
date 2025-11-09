@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use ipc_broker::client::IPCClient;
@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Debug)]
 pub enum ControlMessage {
-    Start,
+    Start(Duration),
     Stop,
     GetStatus(oneshot::Sender<bool>),
     GetDeviceInfo(oneshot::Sender<Vec<DeviceInfo>>),
@@ -36,11 +36,6 @@ pub struct ControlHandler {
 }
 
 impl ControlHandler {
-    pub async fn start(&self) {
-        if let Err(e) = self.tx.send(ControlMessage::Start).await {
-            log::error!("{e}");
-        }
-    }
     pub async fn stop(self) {
         if let Err(e) = self.tx.send(ControlMessage::Quit).await {
             log::error!("{e}");
@@ -95,13 +90,15 @@ impl SystemManager {
             while let Some(msg) = control_rx.recv().await {
                 let client = client.clone();
                 match msg {
-                    ControlMessage::Start => {
+                    ControlMessage::Start(poll_delay) => {
                         if packet_monitor.is_some() {
                             log::warn!("[manager] Already running, ignoring Start.");
                             continue;
                         }
                         if let Some(device) = &selected_device {
-                            match PacketMonitor::start(client.clone(), device.clone()).await {
+                            match PacketMonitor::start(client.clone(), device.clone(), poll_delay)
+                                .await
+                            {
                                 Ok(pm_handler) => {
                                     packet_monitor = Some(pm_handler);
                                     log::info!("[manager] Started PacketMonitor");

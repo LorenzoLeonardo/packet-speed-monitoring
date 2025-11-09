@@ -6,6 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -21,6 +22,7 @@ use axum::{
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use chrono::{Datelike, Local};
 use ipc_broker::client::IPCClient;
+use serde::Deserialize;
 use serde_json::json;
 use tera::Tera;
 use tokio::{
@@ -34,7 +36,11 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tower::{ServiceExt, service_fn};
 use tower_http::services::ServeDir;
 
-use crate::{BIND_ADDR, LOG_FILE, manager::ControlMessage, monitor::device::DeviceInfo};
+use crate::{
+    BIND_ADDR, LOG_FILE,
+    manager::ControlMessage,
+    monitor::{device::DeviceInfo, listener},
+};
 
 #[derive(Clone)]
 struct AppState {
@@ -267,8 +273,34 @@ async fn index_handler() -> axum::response::Response {
     Html(contents).into_response()
 }
 
-async fn start_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let _ = state.sender_channel.send(ControlMessage::Start).await;
+async fn start_handler(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+) -> Json<serde_json::Value> {
+    #[derive(Deserialize, Debug)]
+    struct PollDelay {
+        polling_interval: u64,
+    }
+
+    impl Default for PollDelay {
+        fn default() -> Self {
+            Self {
+                polling_interval: listener::PACKET_SPEED_POLL_DELAY_MS,
+            }
+        }
+    }
+
+    let bytes = body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let poll = serde_json::from_slice::<PollDelay>(&bytes).unwrap_or_default();
+    log::info!("Delay set: {poll:?}");
+    let _ = state
+        .sender_channel
+        .send(ControlMessage::Start(Duration::from_millis(
+            poll.polling_interval,
+        )))
+        .await;
     broadcast_status(&state.tx, true).await; // <-- broadcast to all clients
     Json(json!({ "ok": true, "running": true }))
 }

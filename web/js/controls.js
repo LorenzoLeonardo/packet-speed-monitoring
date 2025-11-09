@@ -45,7 +45,20 @@ export function setupControls() {
 }
 
 export async function startListener() {
-    await fetch("/start", { method: "POST" });
+    const input = document.getElementById("ms-input");
+    const ms = input ? parseInt(input.value, 10) : null;
+
+    // Validate input if needed
+    if (ms === null || isNaN(ms) || ms <= 0) {
+        alert("Please enter a valid polling interval.");
+        return;
+    }
+
+    await fetch("/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ polling_interval: ms }),
+    });
     toggleButtons(true);
 }
 

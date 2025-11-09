@@ -5,7 +5,6 @@ Wants=network-online.target  ipc-broker.service
 
 [Service]
 Environment=HOME=/home/lleonardo
-Environment=PACKET_SPEED_POLL_DELAY_MS=1000
 WorkingDirectory=/home/lleonardo/bin/packet-speed-monitoring
 ExecStart=/home/lleonardo/bin/packet-speed-monitoring/packet-speed-monitoring
 Restart=always

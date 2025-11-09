@@ -14,7 +14,7 @@ use crate::monitor::publisher::BroadcastData;
 use crate::monitor::speed_info::{self, SpeedInfo, Stats};
 
 const SNAPLEN_SPEED_MONITOR: i32 = 1024;
-const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
+pub const PACKET_SPEED_POLL_DELAY_MS: u64 = 1000;
 const CAPTURE_TIMEOUT_MS: i32 = 500;
 const MAC_CACHE_FILE: &str = "packet-speed-monitoring-mac-cache.json";
 const HOSTNAME_CACHE_FILE: &str = "packet-speed-monitoring-hostname-cache.json";
@@ -52,7 +52,10 @@ impl PacketListenerBuilder {
     }
 
     /// Finalize and start the listener
-    pub async fn spawn(self) -> Result<(tokio::task::JoinHandle<()>, AsyncCaptureHandle)> {
+    pub async fn spawn(
+        self,
+        poll_delay: Duration,
+    ) -> Result<(tokio::task::JoinHandle<()>, AsyncCaptureHandle)> {
         let subnet = self.device.network_ip;
         let mask = self.device.netmask;
         let hostname_mgr: HostnameManager = self.hostname_mgr.context("Missing DNS resolver")?;
@@ -66,7 +69,15 @@ impl PacketListenerBuilder {
         let (async_capture, async_handle) = AsyncCapture::new(cap);
         Ok((
             tokio::spawn(async move {
-                run_capture_loop(async_capture, &hostname_mgr, subnet, mask, broadcaster_tx).await
+                run_capture_loop(
+                    async_capture,
+                    &hostname_mgr,
+                    subnet,
+                    mask,
+                    broadcaster_tx,
+                    poll_delay,
+                )
+                .await
             }),
             async_handle,
         ))
@@ -80,12 +91,12 @@ async fn run_capture_loop(
     subnet: Ipv4Addr,
     mask: Ipv4Addr,
     broadcaster_tx: UnboundedSender<Vec<BroadcastData>>,
+    poll_delay: Duration,
 ) {
     log::info!("[listener] packet listener task started.");
     let mut stats: HashMap<Ipv4Addr, Stats> = HashMap::new();
     let mut mac_mgr = MacManager::load_or_new(MAC_CACHE_FILE, Duration::from_secs(60)).await; // 1 min TTL
     let mut max_speeds: HashMap<Ipv4Addr, SpeedInfo> = HashMap::new();
-    let delay = get_poll_delay();
     let mut last = Instant::now();
 
     while let Some(packet) = cap.next_packet().await {
@@ -102,7 +113,7 @@ async fn run_capture_loop(
             log::debug!("Packet processing error: {e}");
         }
         let last_elapsed = last.elapsed();
-        if last_elapsed >= Duration::from_millis(delay) {
+        if last_elapsed >= poll_delay {
             broadcast_stats(
                 &mut stats,
                 &mut max_speeds,
@@ -123,13 +134,6 @@ async fn run_capture_loop(
         }
     }
     log::info!("[listener] packet listener task ended.");
-}
-
-fn get_poll_delay() -> u64 {
-    std::env::var("PACKET_SPEED_POLL_DELAY_MS")
-        .unwrap_or(PACKET_SPEED_POLL_DELAY_MS.to_string())
-        .parse()
-        .unwrap_or(PACKET_SPEED_POLL_DELAY_MS)
 }
 
 async fn process_next_packet(
