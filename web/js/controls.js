@@ -18,10 +18,30 @@ export async function checkStatus() {
 export function setupControls() {
     const startBtn = document.getElementById("start-btn");
     const stopBtn = document.getElementById("stop-btn");
+    const msInput = document.getElementById("ms-input");
 
-    // Attach to buttons
+    // Attach button events
     startBtn.addEventListener("click", startListener);
     stopBtn.addEventListener("click", stopListener);
+
+    msInput.addEventListener("input", () => {
+        let value = parseInt(msInput.value, 10);
+
+        // Clamp the value within min and max range
+        if (isNaN(value) || value < 100) {
+            value = 100;
+        } else if (value > 5000) {
+            value = 5000;
+        }
+
+        msInput.value = value;
+
+        // Enable start button since input is always valid now
+        startBtn.disabled = false;
+    });
+
+    // Initialize button enabled
+    startBtn.disabled = false;
 }
 
 export async function startListener() {
