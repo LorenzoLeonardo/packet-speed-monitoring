@@ -31,6 +31,8 @@ pub struct SpeedInfo {
     ip: String,
     hostname: String,
     mac: String,
+    #[serde(default)]
+    alive_registered: bool,
     mbps_down: f64,
     mbps_up: f64,
     time_utc: String,
@@ -56,6 +58,7 @@ impl SpeedInfo {
             ip,
             hostname,
             mac,
+            alive_registered: false,
             mbps_down: down,
             mbps_up: up,
             time_utc: timestamp.to_rfc3339(),

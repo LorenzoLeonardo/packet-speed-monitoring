@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     convert::Infallible,
     net::SocketAddr,
     str::FromStr,
@@ -24,6 +25,7 @@ use chrono::{Datelike, Local};
 use ipc_broker::client::IPCClient;
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::RwLock;
 use tera::Tera;
 use tokio::{
     sync::{
@@ -49,6 +51,7 @@ struct AppState {
     sender_channel: mpsc::Sender<ControlMessage>, // new controller channel
     client_count: Arc<AtomicUsize>,
     log_tx: broadcast::Sender<String>,
+    registered_ips: Arc<RwLock<HashSet<String>>>,
 }
 
 #[derive(Clone)]
@@ -162,8 +165,41 @@ impl WebServerBuilder {
         };
         let inner_send = tx.clone();
 
+        // Keep a set of registered IPs so we can mark SpeedInfo.alive_registered
+        // in the JSON we forward to SSE clients.
+        let registered_ips = Arc::new(RwLock::new(HashSet::new()));
+        let reg_for_sub = registered_ips.clone();
+
         self.client
             .subscribe_async("application.lan.speed", "speedInfo", move |value| {
+                // Try to parse the incoming value (should be an array of BroadcastData)
+                let text = value.to_string();
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&text)
+                    && let Some(arr) = v.as_array_mut()
+                {
+                    // Synchronously read registered set and mark matching entries
+                    let reg = reg_for_sub.read().unwrap();
+                    for item in arr.iter_mut() {
+                        if let Some(ip) = item
+                            .get("current")
+                            .and_then(|c| c.get("ip"))
+                            .and_then(|s| s.as_str())
+                            && reg.contains(ip)
+                            && let Some(curr) = item.get_mut("current")
+                            && let Some(map) = curr.as_object_mut()
+                        {
+                            map.insert(
+                                "alive_registered".to_string(),
+                                serde_json::Value::Bool(true),
+                            );
+                        }
+                    }
+                    if let Ok(s) = serde_json::to_string(&v) {
+                        let _ = inner_send.send(s);
+                        return;
+                    }
+                }
+                // Fallback: forward original payload unmodified
                 let _ = inner_send.send(value.to_string());
             })
             .await;
@@ -175,6 +211,7 @@ impl WebServerBuilder {
             sender_channel,
             client_count: Arc::new(AtomicUsize::new(0)),
             log_tx,
+            registered_ips: registered_ips.clone(),
         });
         let serve_dir = ServeDir::new("web");
         let app = Router::new()
@@ -182,6 +219,8 @@ impl WebServerBuilder {
             .route("/events", get(sse_handler))
             .route("/start", post(start_handler))
             .route("/stop", post(stop_handler))
+            .route("/register", post(register_handler))
+            .route("/shutdown", post(shutdown_handler))
             .route("/status", get(status_handler))
             .route("/select", post(select_handler))
             .route("/log_event", get(log_stream_handler))
@@ -385,6 +424,66 @@ async fn select_handler(
     broadcast_device_list(state.clone()).await;
 
     Json(json!({ "ok": true }))
+}
+
+async fn register_handler(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+) -> Json<serde_json::Value> {
+    #[derive(Deserialize)]
+    struct Reg {
+        ip: String,
+    }
+
+    let bytes = body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap_or_default();
+    let reg = serde_json::from_slice::<Reg>(&bytes).ok();
+    if let Some(r) = reg {
+        log::info!("Register request for IP: {}", r.ip);
+        // Mark IP as registered so future broadcasts include the flag
+        let _ = state.registered_ips.write().unwrap().insert(r.ip.clone());
+        let payload = json!({ "type": "register", "ip": r.ip });
+        let _ = state.tx.send(payload.to_string());
+        Json(json!({ "ok": true }))
+    } else {
+        Json(json!({ "ok": false, "error": "bad json" }))
+    }
+}
+
+async fn shutdown_handler(
+    State(_state): State<Arc<AppState>>,
+    request: Request<Body>,
+) -> Json<serde_json::Value> {
+    #[derive(Deserialize)]
+    struct Sh {
+        ip: String,
+    }
+
+    let bytes = body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap_or_default();
+    let sh = serde_json::from_slice::<Sh>(&bytes).ok();
+    if let Some(s) = sh {
+        log::info!("Shutdown requested for IP: {}", s.ip);
+        // Fire-and-forget attempt to POST to the client at /shutdown
+        let ip = s.ip.clone();
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let url = format!("http://{}:5248/shutdown", ip);
+            match client.post(&url).send().await {
+                Ok(resp) => {
+                    log::info!("Shutdown POST to {} responded: {}", url, resp.status());
+                }
+                Err(e) => {
+                    log::warn!("Failed to POST shutdown to {}: {e}", url);
+                }
+            }
+        });
+        Json(json!({ "ok": true }))
+    } else {
+        Json(json!({ "ok": false, "error": "bad json" }))
+    }
 }
 
 async fn log_page_handler() -> impl IntoResponse {
