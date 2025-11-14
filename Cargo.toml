@@ -18,6 +18,8 @@ hex = "0.4"
 html-escape = "0.2"
 ipc-broker = "1"
 log = "0.4"
+rustls = "0.23"
+rustls-pemfile = "2.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tera = "1.20"
