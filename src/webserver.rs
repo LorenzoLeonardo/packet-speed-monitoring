@@ -9,6 +9,7 @@ use std::{
     },
     time::Duration,
 };
+use std::{fs::File, io::BufReader};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -23,6 +24,11 @@ use axum::{
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use chrono::{Datelike, Local};
 use ipc_broker::client::IPCClient;
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer},
+};
+use rustls_pemfile::{Item, read_all};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::RwLock;
@@ -110,6 +116,49 @@ async fn spawn_https(
         .serve(app.into_make_service())
         .await;
     log::info!("[webserver] HTTPS Webserver ended.");
+}
+
+async fn configure_tls(cert_path: &str, key_path: &str) -> Result<RustlsConfig> {
+    // --- Load certificate chain ---
+    let mut cert_file = BufReader::new(File::open(cert_path).context("failed to open cert file")?);
+    let items = rustls_pemfile::read_all(&mut cert_file);
+
+    let certs: Vec<CertificateDer<'static>> = items
+        .into_iter()
+        .filter_map(|item| {
+            // Appears as "CERTIFICATE" in PEM files.
+            if let Ok(Item::X509Certificate(cert)) = item {
+                Some(cert.into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // --- Load private key ---
+    let mut key_file = BufReader::new(File::open(key_path).context("failed to open key file")?);
+    let items = read_all(&mut key_file);
+
+    let key = items
+        .into_iter()
+        .find_map(|item| match item {
+            // Appears as "PRIVATE KEY" in PEM files.
+            Ok(Item::Pkcs8Key(k)) => Some(PrivateKeyDer::from(k)),
+            _ => None,
+        })
+        .context("Private key not found")?;
+
+    let versions = vec![&rustls::version::TLS13, &rustls::version::TLS12];
+
+    // Use builder_with_protocol_versions directly
+    let mut server_config = ServerConfig::builder_with_protocol_versions(&versions)
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+
+    // Let's use HTTP/2 and fallback to HTTP/1.1
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"h2".to_vec()];
+
+    Ok(RustlsConfig::from_config(Arc::new(server_config)))
 }
 
 pub struct WebServerBuilder {
@@ -258,7 +307,7 @@ impl WebServer {
 
         let fut = async move {
             if let (Some(cert), Some(key)) = (cert_path, key_path) {
-                match RustlsConfig::from_pem_file(cert, key).await {
+                match configure_tls(&cert, &key).await {
                     Ok(rustls_config) => {
                         spawn_https(&bind_addr, app, stopper.clone(), rustls_config).await;
                     }
