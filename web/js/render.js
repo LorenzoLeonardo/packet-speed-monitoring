@@ -36,6 +36,7 @@ export function renderRow(ip, curr, max) {
     <td>${formatDate(dateMaxDownUTC)}</td>
     <td>${formatSpeed(max.mbps_up)}</td>
     <td>${formatDate(dateMaxUpUTC)}</td>
+    <td class="actions-cell">${curr.alive_registered ? `<button class="shutdown-btn" data-ip="${ip}">Shutdown</button>` : ""}</td>
   `;
 
     const existingRow = document.querySelector(`tr[data-ip="${ip}"]`);
@@ -60,6 +61,27 @@ export function renderRow(ip, curr, max) {
     const isServer = curr.ip === getSelectedDeviceIp();
 
     row.classList.toggle("selected-device", isServer);
+
+    // Attach shutdown handler if present
+    const btn = row.querySelector(".shutdown-btn");
+    if (btn) {
+        btn.removeEventListener("click", btn._shutdownHandler);
+        const handler = async (e) => {
+            const ip = e.currentTarget.dataset.ip;
+            try {
+                await fetch('/shutdown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+            } catch (err) {
+                alert('Shutdown request failed: ' + err);
+            }
+        };
+        // Store handler reference so removeEventListener can work
+        btn._shutdownHandler = handler;
+        btn.addEventListener('click', handler);
+    }
 }
 
 export function rerenderAllRows() {

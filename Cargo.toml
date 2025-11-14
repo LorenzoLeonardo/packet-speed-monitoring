@@ -25,3 +25,4 @@ tokio = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }

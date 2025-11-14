@@ -25,6 +25,18 @@ export function initSSE() {
                     toggleButtons(msg.running);
                     document.querySelector("#speed-table tbody").innerHTML = "";
                     return;
+                case "register":
+                    // Mark an IP as having registered (show shutdown button)
+                    try {
+                        const ip = msg.ip;
+                        const entry = rowDataMap.get(ip);
+                        if (entry) {
+                            entry.current.alive_registered = true;
+                            renderRow(ip, entry.current, entry.max);
+                            sortTable();
+                        }
+                    } catch (e) { console.warn(e); }
+                    return;
             }
 
             if (!Array.isArray(msg)) {
