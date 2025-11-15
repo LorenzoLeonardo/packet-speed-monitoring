@@ -61,30 +61,49 @@ $installScriptContent = @"
 `$TlsSource = Join-Path `$InstallerDir "tls"
 `$WebSource = Join-Path `$InstallerDir "web"
 `$ExeSource = Join-Path `$InstallerDir "packet-speed-monitoring.exe"
-
+`$DestDir = "`$env:USERPROFILE\bin\packet-speed-monitoring"
+`$ExecutableName = "packet-speed-monitoring.exe"
+`$ServiceName = "packet-speed-monitoring"
+`$NssmPath = "C:\nssm\win64\nssm.exe"
 `$NssmDest = "C:\nssm"
-`$UserBinDir = Join-Path `$env:USERPROFILE "bin"
 
 Write-Host "Starting installation..."
+
+# Stop and remove existing service
+if (Get-Service -Name `$ServiceName -ErrorAction SilentlyContinue) {
+    Write-Host "Stopping service `$ServiceName..."
+    Stop-Service -Name `$ServiceName -Force
+    Write-Host "Removing service `$ServiceName..."
+    & `$NssmPath remove `$ServiceName confirm
+} else {
+    Write-Host "Service `$ServiceName not found, skipping..."
+}
 
 if (!(Test-Path `$NssmDest)) {
     Write-Host "Copying NSSM folder to `$NssmDest"
     Copy-Item -Path `$NssmSource -Destination `$NssmDest -Recurse -Force
 }
 
-if (!(Test-Path `$UserBinDir)) {
-    Write-Host "Creating `$UserBinDir"
-    New-Item -ItemType Directory -Force -Path `$UserBinDir | Out-Null
+# Remove old executable and directory
+if (Test-Path "`$DestDir\`$ExecutableName") {
+    Write-Host "Removing old executable..."
+    Remove-Item "`$DestDir\`$ExecutableName" -Force
 }
 
-Write-Host "Copying tls folder to `$UserBinDir"
-Copy-Item -Path `$TlsSource -Destination `$UserBinDir -Recurse -Force
+if (Test-Path "`$DestDir") {
+    Write-Host "Removing old directory..."
+    Remove-Item `$DestDir -Recurse -Force
+}
 
-Write-Host "Copying web folder to `$UserBinDir"
-Copy-Item -Path `$WebSource -Destination `$UserBinDir -Recurse -Force
+New-Item -ItemType Directory -Force -Path `$DestDir | Out-Null
+Write-Host "Copying tls folder to `$DestDir"
+Copy-Item -Path `$TlsSource -Destination `$DestDir -Recurse -Force
 
-Write-Host "Copying packet-speed-monitoring.exe to `$UserBinDir"
-Copy-Item -Path `$ExeSource -Destination `$UserBinDir -Force
+Write-Host "Copying web folder to `$DestDir"
+Copy-Item -Path `$WebSource -Destination `$DestDir -Recurse -Force
+
+Write-Host "Copying packet-speed-monitoring.exe to `$DestDir"
+Copy-Item -Path `$ExeSource -Destination `$DestDir -Force
 
 # Add NSSM bin path to user PATH environment variable
 `$nssmBinPath = "C:\nssm\win64"
@@ -122,16 +141,15 @@ Write-Host "Installation complete!"
 # === Register new Windows service ===
 Write-Host "=== Registering new service using NSSM ==="
 
-`$NssmPath = "C:\nssm\win64\nssm.exe"
-& `$NssmPath install `$ServiceName "`$UserBinDir\`$ExecutableName"
-& `$NssmPath set `$ServiceName AppDirectory `$UserBinDir
+& `$NssmPath install `$ServiceName "`$DestDir\`$ExecutableName"
+& `$NssmPath set `$ServiceName AppDirectory `$DestDir
 & `$NssmPath set `$ServiceName Start SERVICE_AUTO_START
 & `$NssmPath start `$ServiceName
 
 # Verify
 Write-Host "=== Checking service status ==="
 Get-Service -Name `$ServiceName
-Write-Host "Installation complete ✅"
+Write-Host "Installation complete ..."
 "@
 
 # Write the install.ps1 file inside installer folder
