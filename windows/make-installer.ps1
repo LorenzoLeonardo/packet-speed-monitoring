@@ -150,6 +150,38 @@ Write-Host "=== Registering new service using NSSM ==="
 Write-Host "=== Checking service status ==="
 Get-Service -Name `$ServiceName
 Write-Host "Installation complete ..."
+
+# === Add Firewall Rule for auto-server-detection.exe ===
+Write-Host "Adding firewall rule for `$ExecutableName..."
+
+`$firewallRuleName = "Allow-`$ExecutableName"
+`$exePath = "`$DestDir\`$ExecutableName"
+
+# Check if rule already exists
+`$existingRule = Get-NetFirewallApplicationFilter -Program `$exePath -ErrorAction SilentlyContinue
+
+if (-not `$existingRule) {
+    New-NetFirewallRule `
+        -DisplayName `$firewallRuleName `
+        -Direction Inbound `
+        -Program `$exePath `
+        -Action Allow `
+        -Profile Any `
+        -Description "Allows inbound traffic for `$ExecutableName"
+
+    New-NetFirewallRule `
+        -DisplayName "`$firewallRuleName-Out" `
+        -Direction Outbound `
+        -Program `$exePath `
+        -Action Allow `
+        -Profile Any `
+        -Description "Allows outbound traffic for `$ExecutableName"
+
+    Write-Host "Firewall rules created."
+}
+else {
+    Write-Host "Firewall rule already exists for `$ExecutableName. Skipping..."
+}
 "@
 
 # Write the install.ps1 file inside installer folder
