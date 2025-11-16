@@ -16,13 +16,14 @@ use axum::{
     Json, Router,
     body::{self, Body},
     extract::State,
-    http::Request,
+    http::{Method, Request, Response, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Sse, sse::Event},
     routing::{get, post},
 };
 use axum_server::{Handle, tls_rustls::RustlsConfig};
 use chrono::{Datelike, Local};
+use curl_http_client::{Collector, HttpClient, dep::async_curl::CurlActor};
 use ipc_broker::client::IPCClient;
 use rustls::{
     ServerConfig,
@@ -500,6 +501,30 @@ async fn register_handler(
     }
 }
 
+async fn http_request(url: &str) -> Result<Response<Option<Vec<u8>>>> {
+    let request = Request::builder()
+        .uri(url)
+        .method(Method::POST)
+        .header(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/json"),
+        )
+        .body(None)?;
+
+    let curl = CurlActor::new();
+    let collector = Collector::RamAndHeaders(Vec::new(), Vec::new());
+    HttpClient::new(collector)
+        .connect_timeout(Duration::from_secs(5))
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        .timeout(Duration::from_secs(10))
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        .request(request)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        .nonblocking(curl)
+        .perform()
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+}
 async fn shutdown_handler(
     State(_state): State<Arc<AppState>>,
     request: Request<Body>,
@@ -517,19 +542,19 @@ async fn shutdown_handler(
         log::info!("Shutdown requested for IP: {}", s.ip);
         // Fire-and-forget attempt to POST to the client at /shutdown
         let ip = s.ip.clone();
-        tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            let url = format!("http://{}:5248/shutdown", ip);
-            match client.post(&url).send().await {
-                Ok(resp) => {
-                    log::info!("Shutdown POST to {} responded: {}", url, resp.status());
-                }
-                Err(e) => {
-                    log::warn!("Failed to POST shutdown to {}: {e}", url);
-                }
+        let url = format!("http://{}:5248/shutdown", ip);
+        let response = http_request(&url).await;
+
+        match response {
+            Ok(resp) => {
+                log::info!("Shutdown POST to {} responded: {}", url, resp.status());
+                Json(json!({ "ok": true }))
             }
-        });
-        Json(json!({ "ok": true }))
+            Err(e) => {
+                log::warn!("Failed to POST shutdown to {}: {e}", url);
+                Json(json!({ "ok": false, "error": e.to_string() }))
+            }
+        }
     } else {
         Json(json!({ "ok": false, "error": "bad json" }))
     }
