@@ -11,6 +11,7 @@ async-pcap = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 chrono = "0.4"
+curl-http-client = "2.4"
 dhcproto = { version = "0.14", features = ["serde"] }
 etherparse = "0.19"
 fern = "0.7"
@@ -27,4 +28,4 @@ tokio = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
