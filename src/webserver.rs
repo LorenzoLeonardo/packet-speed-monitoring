@@ -35,6 +35,7 @@ use serde_json::json;
 use std::sync::RwLock;
 use tera::Tera;
 use tokio::{
+    runtime::Builder,
     sync::{
         broadcast::{self, error::RecvError},
         mpsc, oneshot, watch,
@@ -510,8 +511,8 @@ async fn http_request(url: &str) -> Result<Response<Option<Vec<u8>>>> {
             header::HeaderValue::from_static("application/json"),
         )
         .body(None)?;
-
-    let curl = CurlActor::new();
+    let runtime = Builder::new_multi_thread().enable_all().build()?;
+    let curl = CurlActor::new_runtime(runtime);
     let collector = Collector::RamAndHeaders(Vec::new(), Vec::new());
     HttpClient::new(collector)
         .connect_timeout(Duration::from_secs(5))

@@ -11,7 +11,7 @@ async-pcap = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 chrono = "0.4"
-curl-http-client = "2.4"
+curl-http-client = "2.5"
 dhcproto = { version = "0.14", features = ["serde"] }
 etherparse = "0.19"
 fern = "0.7"
