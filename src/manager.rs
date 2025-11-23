@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+use curl_http_client::{Collector, dep::async_curl::CurlActor};
 use ipc_broker::client::IPCClient;
 use tokio::{
     sync::{
@@ -65,7 +66,7 @@ impl SystemManager {
         }
     }
 
-    pub async fn spawn(&self) -> Result<ControlHandler> {
+    pub async fn spawn(&self, curl_actor: CurlActor<Collector>) -> Result<ControlHandler> {
         let (control_tx, mut control_rx) = mpsc::channel::<ControlMessage>(8);
         // --- Spawn control background task ---
         let client = self.client.clone();
@@ -77,7 +78,7 @@ impl SystemManager {
             .cert_paths(TLS_CERT, TLS_KEY)
             .add_sender_channel(control_tx.clone())
             .add_log_channel(self.sse_log_tx.clone())
-            .spawn()
+            .spawn(curl_actor)
             .await?;
 
         let cntrl_fut = async move {

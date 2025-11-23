@@ -35,7 +35,6 @@ use serde_json::json;
 use std::sync::RwLock;
 use tera::Tera;
 use tokio::{
-    runtime::Builder,
     sync::{
         broadcast::{self, error::RecvError},
         mpsc, oneshot, watch,
@@ -60,6 +59,7 @@ struct AppState {
     client_count: Arc<AtomicUsize>,
     log_tx: broadcast::Sender<String>,
     registered_ips: Arc<RwLock<HashSet<String>>>,
+    curl_actor: CurlActor<Collector>,
 }
 
 #[derive(Clone)]
@@ -205,7 +205,7 @@ impl WebServerBuilder {
         self
     }
 
-    pub async fn spawn(self) -> Result<WebServerHandler> {
+    pub async fn spawn(self, curl_actor: CurlActor<Collector>) -> Result<WebServerHandler> {
         let bind_addr = self.bind_addr.unwrap_or_else(|| BIND_ADDR.to_string());
         let sender_channel = self.control.context("No sender channel set")?;
         let (tx, _rx) = broadcast::channel(100);
@@ -263,6 +263,7 @@ impl WebServerBuilder {
             client_count: Arc::new(AtomicUsize::new(0)),
             log_tx,
             registered_ips: registered_ips.clone(),
+            curl_actor,
         });
         let serve_dir = ServeDir::new("web");
         let app = Router::new()
@@ -502,7 +503,7 @@ async fn register_handler(
     }
 }
 
-async fn http_request(url: &str) -> Result<Response<Option<Vec<u8>>>> {
+async fn http_request(url: &str, curl: CurlActor<Collector>) -> Result<Response<Option<Vec<u8>>>> {
     let request = Request::builder()
         .uri(url)
         .method(Method::POST)
@@ -511,8 +512,7 @@ async fn http_request(url: &str) -> Result<Response<Option<Vec<u8>>>> {
             header::HeaderValue::from_static("application/json"),
         )
         .body(None)?;
-    let runtime = Builder::new_multi_thread().enable_all().build()?;
-    let curl = CurlActor::new_runtime(runtime);
+
     let collector = Collector::RamAndHeaders(Vec::new(), Vec::new());
     HttpClient::new(collector)
         .connect_timeout(Duration::from_secs(5))
@@ -527,7 +527,7 @@ async fn http_request(url: &str) -> Result<Response<Option<Vec<u8>>>> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 async fn shutdown_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Json<serde_json::Value> {
     #[derive(Deserialize)]
@@ -544,7 +544,7 @@ async fn shutdown_handler(
         // Fire-and-forget attempt to POST to the client at /shutdown
         let ip = s.ip.clone();
         let url = format!("http://{}:5248/shutdown", ip);
-        let response = http_request(&url).await;
+        let response = http_request(&url, state.curl_actor.clone()).await;
 
         match response {
             Ok(resp) => {

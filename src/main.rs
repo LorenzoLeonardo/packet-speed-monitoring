@@ -8,8 +8,12 @@ mod webserver;
 use std::sync::Arc;
 
 use anyhow::Result;
+use curl_http_client::{Collector, dep::async_curl::CurlActor};
 use ipc_broker::client::IPCClient;
-use tokio::sync::{Notify, broadcast};
+use tokio::{
+    runtime::Builder,
+    sync::{Notify, broadcast},
+};
 
 use crate::{logger::Log, manager::SystemManager};
 
@@ -25,7 +29,10 @@ async fn wait_for_remote_object(handle: &IPCClient) -> Result<()> {
     Ok(())
 }
 
-async fn run_app(sse_log_tx: broadcast::Sender<String>) -> Result<()> {
+async fn run_app(
+    sse_log_tx: broadcast::Sender<String>,
+    curl_actor: CurlActor<Collector>,
+) -> Result<()> {
     let client = IPCClient::connect().await?;
     // Trigger via process or triggered outside by the OS to stop the process properly.
     let manual_trigger = Arc::new(Notify::new());
@@ -33,7 +40,7 @@ async fn run_app(sse_log_tx: broadcast::Sender<String>) -> Result<()> {
     wait_for_remote_object(&client).await?;
 
     let handle = SystemManager::new(client, Arc::clone(&manual_trigger), sse_log_tx)
-        .spawn()
+        .spawn(curl_actor)
         .await?;
 
     // wait here until signal is sent
@@ -43,11 +50,12 @@ async fn run_app(sse_log_tx: broadcast::Sender<String>) -> Result<()> {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
+    let curl_actor = CurlActor::new_runtime(Builder::new_multi_thread().enable_all().build()?);
     // Initialize the logger, lets panic if it fails intentionally
     // It mean disk is full or permission issue
     let log = Log::init().await.unwrap();
     let sse_log_tx = log.tx.clone();
-    let res = run_app(sse_log_tx).await;
+    let res = run_app(sse_log_tx, curl_actor).await;
 
     log.shutdown().await;
     res
