@@ -58,9 +58,9 @@ $installScriptContent = @"
 
 `$InstallerDir = "`$PSScriptRoot"
 `$NssmSource = Join-Path `$InstallerDir "nssm"
+`$ExeSource = Join-Path `$InstallerDir "packet-speed-monitoring.exe"
 `$TlsSource = Join-Path `$InstallerDir "tls"
 `$WebSource = Join-Path `$InstallerDir "web"
-`$ExeSource = Join-Path `$InstallerDir "packet-speed-monitoring.exe"
 `$DestDir = "`$env:USERPROFILE\bin\packet-speed-monitoring"
 `$ExecutableName = "packet-speed-monitoring.exe"
 `$ServiceName = "packet-speed-monitoring"
@@ -96,14 +96,14 @@ if (Test-Path "`$DestDir") {
 }
 
 New-Item -ItemType Directory -Force -Path `$DestDir | Out-Null
+Write-Host "Copying packet-speed-monitoring.exe to `$DestDir"
+Copy-Item -Path `$ExeSource -Destination `$DestDir -Force
+
 Write-Host "Copying tls folder to `$DestDir"
 Copy-Item -Path `$TlsSource -Destination `$DestDir -Recurse -Force
 
 Write-Host "Copying web folder to `$DestDir"
 Copy-Item -Path `$WebSource -Destination `$DestDir -Recurse -Force
-
-Write-Host "Copying packet-speed-monitoring.exe to `$DestDir"
-Copy-Item -Path `$ExeSource -Destination `$DestDir -Force
 
 # Add NSSM bin path to user PATH environment variable
 `$nssmBinPath = "C:\nssm\win64"
@@ -161,22 +161,8 @@ Write-Host "Adding firewall rule for `$ExecutableName..."
 `$existingRule = Get-NetFirewallApplicationFilter -Program `$exePath -ErrorAction SilentlyContinue
 
 if (-not `$existingRule) {
-    New-NetFirewallRule `
-        -DisplayName `$firewallRuleName `
-        -Direction Inbound `
-        -Program `$exePath `
-        -Action Allow `
-        -Profile Any `
-        -Description "Allows inbound traffic for `$ExecutableName"
-
-    New-NetFirewallRule `
-        -DisplayName "`$firewallRuleName-Out" `
-        -Direction Outbound `
-        -Program `$exePath `
-        -Action Allow `
-        -Profile Any `
-        -Description "Allows outbound traffic for `$ExecutableName"
-
+    New-NetFirewallRule -DisplayName `$firewallRuleName -Direction Inbound -Program `$exePath -Action Allow -Profile Any -Description "Allows inbound traffic for `$ExecutableName"
+    New-NetFirewallRule -DisplayName "`$firewallRuleName-Out" -Direction Outbound -Program `$exePath -Action Allow -Profile Any -Description "Allows outbound traffic for `$ExecutableName"
     Write-Host "Firewall rules created."
 }
 else {
