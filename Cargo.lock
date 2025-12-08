@@ -1006,9 +1006,9 @@ dependencies = [
 
 [[package]]
 name = "ipc-broker"
-version = "1.0.2"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bfa2d171a6cc5a2ef48d7c35468af60e2c5682a6a3baf28a9f45461a4f71681"
+checksum = "68540bf8ad0d10bd5eaf312b98ac0a4c5cc11fd85ab1961d7f5b542e0c075b09"
 dependencies = [
  "async-trait",
  "chrono",
