@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "packet-speed-monitoring"
-version = "0.2.21"
+version = "0.2.22"
 dependencies = [
  "anyhow",
  "async-pcap",
