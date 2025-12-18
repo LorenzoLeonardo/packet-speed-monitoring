@@ -29,3 +29,12 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
 
+[profile.release]
+opt-level = "z"          # optimize for minimum size
+lto = true               # full link-time optimization
+codegen-units = 1        # better optimization, smaller binary
+panic = "abort"          # remove unwind machinery
+strip = "symbols"        # remove all symbols
+debug = false            # remove debug info
+incremental = false      # prevent extra metadata
+overflow-checks = false  # remove overflow checks
