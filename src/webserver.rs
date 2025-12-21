@@ -9,7 +9,6 @@ use std::{
     },
     time::Duration,
 };
-use std::{fs::File, io::BufReader};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -27,14 +26,17 @@ use curl_http_client::{Collector, HttpClient, dep::async_curl::CurlActor};
 use ipc_broker::client::IPCClient;
 use rustls::{
     ServerConfig,
-    pki_types::{CertificateDer, PrivateKeyDer},
+    pki_types::{
+        CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, PrivateSec1KeyDer,
+    },
 };
-use rustls_pemfile::{Item, read_all};
+
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::RwLock;
 use tera::Tera;
 use tokio::{
+    fs,
     sync::{
         broadcast::{self, error::RecvError},
         mpsc, oneshot, watch,
@@ -120,45 +122,44 @@ async fn spawn_https(
     log::info!("[webserver] HTTPS Webserver ended.");
 }
 
-async fn configure_tls(cert_path: &str, key_path: &str) -> Result<RustlsConfig> {
-    // --- Load certificate chain ---
-    let mut cert_file = BufReader::new(File::open(cert_path).context("failed to open cert file")?);
-    let items = rustls_pemfile::read_all(&mut cert_file);
+pub async fn configure_tls(cert_path: &str, key_path: &str) -> Result<RustlsConfig> {
+    // ---------- Load certificate chain ----------
+    let cert_pem = fs::read(cert_path).await?;
 
-    let certs: Vec<CertificateDer<'static>> = items
+    let certs: Vec<CertificateDer<'static>> = pem::parse_many(&cert_pem)?
         .into_iter()
-        .filter_map(|item| {
-            // Appears as "CERTIFICATE" in PEM files.
-            if let Ok(Item::X509Certificate(cert)) = item {
-                Some(cert.into_owned())
-            } else {
-                None
-            }
-        })
+        .filter(|p| p.tag() == "CERTIFICATE")
+        .map(|p| CertificateDer::from(p.contents().to_vec()))
         .collect();
 
-    // --- Load private key ---
-    let mut key_file = BufReader::new(File::open(key_path).context("failed to open key file")?);
-    let items = read_all(&mut key_file);
+    // ---------- Load private key ----------
+    let key_pem = fs::read(key_path).await?;
 
-    let key = items
+    let key: PrivateKeyDer<'static> = pem::parse_many(&key_pem)?
         .into_iter()
-        .find_map(|item| match item {
-            // Appears as "PRIVATE KEY" in PEM files.
-            Ok(Item::Pkcs8Key(k)) => Some(PrivateKeyDer::from(k)),
+        .find_map(|p| match p.tag() {
+            "PRIVATE KEY" => Some(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+                p.contents().to_vec(),
+            ))),
+            "RSA PRIVATE KEY" => Some(PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(
+                p.contents().to_vec(),
+            ))),
+            "EC PRIVATE KEY" => Some(PrivateKeyDer::Sec1(PrivateSec1KeyDer::from(
+                p.contents().to_vec(),
+            ))),
             _ => None,
         })
-        .context("Private key not found")?;
+        .context("no supported private key found")?;
 
+    // ---------- TLS config ----------
     let versions = vec![&rustls::version::TLS13, &rustls::version::TLS12];
 
-    // Use builder_with_protocol_versions directly
     let mut server_config = ServerConfig::builder_with_protocol_versions(&versions)
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
 
-    // Let's use HTTP/2 and fallback to HTTP/1.1
-    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"h2".to_vec()];
+    // Prefer HTTP/2, fallback to HTTP/1.1
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     Ok(RustlsConfig::from_config(Arc::new(server_config)))
 }

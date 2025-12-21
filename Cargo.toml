@@ -9,7 +9,7 @@ authors = ["Lorenzo Leonardo <enzotechcomputersolutions@gmail.com>"]
 anyhow = "1.0"
 async-pcap = "0.1"
 axum = { version = "0.8", features = ["macros"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 chrono = "0.4"
 curl-http-client = "2.5"
 dhcproto = { version = "0.14", features = ["serde"] }
@@ -19,8 +19,8 @@ hex = "0.4"
 html-escape = "0.2"
 ipc-broker = "1"
 log = "0.4"
+pem = "3.0"
 rustls = "0.23"
-rustls-pemfile = "2.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tera = "1.20"
